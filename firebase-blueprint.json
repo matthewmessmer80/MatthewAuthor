@@ -1,0 +1,495 @@
+{
+  "entities": {
+    "admin": {
+      "title": "Admin",
+      "description": "Authorized administrator accounts",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "Administrator email address"
+        },
+        "role": {
+          "type": "string",
+          "description": "Administrator role name"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp when admin was registered"
+        }
+      },
+      "required": ["email", "role"]
+    },
+    "user": {
+      "title": "User",
+      "description": "Three-tier user accounts (Reader, Editor, Author)",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "User email address"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Display name"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["READER", "EDITOR", "AUTHOR"],
+          "description": "User primary access role"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "suspended", "pending"],
+          "description": "Account status"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Registration timestamp"
+        }
+      },
+      "required": ["email", "displayName", "role"]
+    },
+    "comment": {
+      "title": "Comment",
+      "description": "Reader comments and moderation state",
+      "type": "object",
+      "properties": {
+        "bookId": {
+          "type": "string",
+          "description": "Book ID"
+        },
+        "userId": {
+          "type": "string",
+          "description": "User ID of commenter"
+        },
+        "userName": {
+          "type": "string",
+          "description": "Display name of commenter"
+        },
+        "content": {
+          "type": "string",
+          "description": "Comment text"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["PENDING", "APPROVED", "HIDDEN", "REMOVED", "FLAGGED"],
+          "description": "Moderation status"
+        }
+      },
+      "required": ["bookId", "userId", "content", "status"]
+    },
+    "commentReport": {
+      "title": "CommentReport",
+      "description": "Reader reports on inappropriate comments",
+      "type": "object",
+      "properties": {
+        "commentId": {
+          "type": "string",
+          "description": "Target comment ID"
+        },
+        "reason": {
+          "type": "string",
+          "description": "Report reason"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["PENDING_REVIEW", "RESOLVED", "DISMISSED"],
+          "description": "Review status"
+        }
+      },
+      "required": ["commentId", "reason", "status"]
+    },
+    "readerMessage": {
+      "title": "ReaderMessage",
+      "description": "Reader correspondence submitted via website",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Sender name"
+        },
+        "email": {
+          "type": "string",
+          "description": "Sender email"
+        },
+        "subject": {
+          "type": "string",
+          "description": "Message subject"
+        },
+        "message": {
+          "type": "string",
+          "description": "Message body"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["unread", "read", "replied", "archived"],
+          "description": "Message state"
+        }
+      },
+      "required": ["name", "email", "message", "status"]
+    },
+    "book": {
+      "title": "Book",
+      "description": "Author book collection including status, covers, and metadata",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Full book title"
+        },
+        "subtitle": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Book subtitle or volume identifier"
+        },
+        "slug": {
+          "type": "string",
+          "maxLength": 150,
+          "pattern": "^[a-z0-9-]+$",
+          "description": "URL slug for canonical routing"
+        },
+        "seriesId": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Associated series ID"
+        },
+        "seriesName": {
+          "type": "string",
+          "maxLength": 150,
+          "description": "Display name of the series"
+        },
+        "seriesOrder": {
+          "type": "number",
+          "description": "Reading sequence order in series"
+        },
+        "bookNumber": {
+          "type": "number",
+          "description": "Numbered volume in the series"
+        },
+        "shortDescription": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Brief summary or teaser hook"
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 10000,
+          "description": "Complete book synopsis"
+        },
+        "genre": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Primary genre"
+        },
+        "coverImage": {
+          "type": "string",
+          "description": "Public URL or data URI of book cover"
+        },
+        "coverImageAlt": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "Accessible alt text for cover"
+        },
+        "coverStoragePath": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Firebase Cloud Storage path"
+        },
+        "amazonUrl": {
+          "type": "string",
+          "description": "Direct Amazon / Kindle purchase link"
+        },
+        "author": {
+          "type": "string",
+          "maxLength": 150,
+          "description": "Author attribution name"
+        },
+        "language": {
+          "type": "string",
+          "maxLength": 50,
+          "description": "Book language"
+        },
+        "isbn": {
+          "type": "string",
+          "maxLength": 50,
+          "description": "International Standard Book Number"
+        },
+        "publisher": {
+          "type": "string",
+          "maxLength": 150,
+          "description": "Publishing house imprint"
+        },
+        "publicationDate": {
+          "type": "string",
+          "maxLength": 50,
+          "description": "Publication year or release date"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["published", "upcoming", "in-progress", "archived"],
+          "description": "Internal workflow progress status"
+        },
+        "publicationState": {
+          "type": "string",
+          "enum": ["PUBLIC", "TEASER", "DRAFT", "PRIVATE"],
+          "description": "Visibility and indexing state"
+        },
+        "featured": {
+          "type": "boolean",
+          "description": "Whether book is prominently featured on homepage"
+        },
+        "seoTitle": {
+          "type": "string",
+          "maxLength": 150,
+          "description": "Target HTML title tag for SEO"
+        },
+        "metaDescription": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "Target meta description for SEO"
+        },
+        "canonicalUrl": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "Canonical URL link for SEO"
+        },
+        "socialImage": {
+          "type": "string",
+          "description": "Social share OpenGraph preview image"
+        },
+        "indexing": {
+          "type": "string",
+          "enum": ["index", "noindex"],
+          "description": "Search engine indexing directive"
+        }
+      },
+      "required": ["title", "publicationState"]
+    },
+    "series": {
+      "title": "Series",
+      "description": "Book series management with ordering",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 150,
+          "description": "Series title"
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 5000,
+          "description": "Series overview and worldbuilding lore"
+        },
+        "shortDescription": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Series tagline or teaser"
+        },
+        "publicationState": {
+          "type": "string",
+          "enum": ["PUBLIC", "TEASER", "DRAFT", "PRIVATE"],
+          "description": "Series visibility"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["published", "in-progress", "archived"],
+          "description": "Series completion status"
+        }
+      },
+      "required": ["name", "publicationState"]
+    },
+    "story": {
+      "title": "Story",
+      "description": "Short stories and side tales",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Short story title"
+        },
+        "slug": {
+          "type": "string",
+          "maxLength": 150,
+          "pattern": "^[a-z0-9-]+$",
+          "description": "URL slug"
+        },
+        "publicationState": {
+          "type": "string",
+          "enum": ["PUBLIC", "TEASER", "DRAFT", "PRIVATE"],
+          "description": "Visibility state"
+        }
+      },
+      "required": ["title", "publicationState"]
+    },
+    "news": {
+      "title": "News",
+      "description": "Author news articles and publication updates",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Article headline"
+        },
+        "slug": {
+          "type": "string",
+          "maxLength": 150,
+          "pattern": "^[a-z0-9-]+$",
+          "description": "URL slug"
+        },
+        "publicationState": {
+          "type": "string",
+          "enum": ["PUBLIC", "TEASER", "DRAFT", "PRIVATE"],
+          "description": "Publication state"
+        }
+      },
+      "required": ["title", "publicationState"]
+    },
+    "subscriber": {
+      "title": "Subscriber",
+      "description": "Newsletter subscribers with consent timestamps",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "maxLength": 150,
+          "description": "Subscriber email address"
+        },
+        "firstName": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Subscriber first name"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "unsubscribed", "pending"],
+          "description": "Subscription status"
+        },
+        "consentGiven": {
+          "type": "boolean",
+          "description": "Explicit double opt-in or privacy consent"
+        }
+      },
+      "required": ["email", "consentGiven", "status"]
+    },
+    "newsletter": {
+      "title": "Newsletter",
+      "description": "Newsletters drafts, scheduled, and sent campaigns",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Internal campaign title"
+        },
+        "subject": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Email subject line"
+        },
+        "previewText": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "Preheader snippet"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["draft", "scheduled", "sent", "archived"],
+          "description": "Campaign status"
+        }
+      },
+      "required": ["title", "subject", "status"]
+    },
+    "auditLog": {
+      "title": "AuditLog",
+      "description": "Immutable administrative activity record",
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Action performed"
+        },
+        "targetId": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Identifier of affected document"
+        },
+        "targetType": {
+          "type": "string",
+          "maxLength": 50,
+          "description": "Type of resource modified"
+        },
+        "details": {
+          "type": "string",
+          "maxLength": 2000,
+          "description": "Summary of modifications"
+        },
+        "userEmail": {
+          "type": "string",
+          "maxLength": 150,
+          "description": "Email of acting admin"
+        },
+        "userId": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "UID of acting admin"
+        }
+      },
+      "required": ["action", "targetType", "userEmail", "userId"]
+    }
+  },
+  "firestore": {
+    "/admins/{adminId}": {
+      "schema": "#/entities/admin",
+      "description": "Admin authorization registry"
+    },
+    "/users/{userId}": {
+      "schema": "#/entities/user",
+      "description": "Three-tier user accounts"
+    },
+    "/comments/{commentId}": {
+      "schema": "#/entities/comment",
+      "description": "Book discussion comments"
+    },
+    "/commentReports/{reportId}": {
+      "schema": "#/entities/commentReport",
+      "description": "Inappropriate comment reports"
+    },
+    "/messages/{messageId}": {
+      "schema": "#/entities/readerMessage",
+      "description": "Reader inquiries and correspondence"
+    },
+    "/books/{bookId}": {
+      "schema": "#/entities/book",
+      "description": "Author books catalog"
+    },
+    "/series/{seriesId}": {
+      "schema": "#/entities/series",
+      "description": "Book series taxonomy and reading order"
+    },
+    "/stories/{storyId}": {
+      "schema": "#/entities/story",
+      "description": "Short stories and side lore"
+    },
+    "/news/{newsId}": {
+      "schema": "#/entities/news",
+      "description": "Author news articles and updates"
+    },
+    "/subscribers/{subscriberId}": {
+      "schema": "#/entities/subscriber",
+      "description": "Reader newsletter subscription opt-ins"
+    },
+    "/newsletters/{newsletterId}": {
+      "schema": "#/entities/newsletter",
+      "description": "Author newsletter campaigns"
+    },
+    "/auditLogs/{logId}": {
+      "schema": "#/entities/auditLog",
+      "description": "System activity audit logs"
+    }
+  }
+}

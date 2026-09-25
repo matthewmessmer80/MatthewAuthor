@@ -1,0 +1,162 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAuthor() {
+      return isAuthenticated() && (
+        request.auth.token.email == 'mmessmer80@gmail.com' ||
+        (exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role in ['admin', 'author', 'ADMIN', 'AUTHOR']) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['AUTHOR', 'author', 'ADMIN', 'admin'])
+      );
+    }
+
+    function isEditor() {
+      return isAuthor() || (
+        isAuthenticated() && (
+          (exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
+           get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role in ['admin', 'author', 'editor', 'ADMIN', 'AUTHOR', 'EDITOR']) ||
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['AUTHOR', 'EDITOR', 'author', 'editor'])
+        )
+      );
+    }
+
+    // Default deny for unmapped paths
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Admins registry
+    match /admins/{userId} {
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isEditor());
+      allow write: if isAuthor();
+    }
+
+    // Users registry (Three-Tier User Profiles)
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow update: if isAuthenticated() && (
+        isAuthor() ||
+        (request.auth.uid == userId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'status']))
+      );
+      allow delete: if isAuthor();
+    }
+
+    // Comments collection
+    match /comments/{commentId} {
+      allow read: if resource == null ||
+                     resource.data.status in ['APPROVED', 'approved'] ||
+                     isEditor() ||
+                     (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if isEditor() ||
+                       (isAuthenticated() &&
+                        resource.data.userId == request.auth.uid &&
+                        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'reportCount', 'moderatedBy', 'moderatedAt'])) ||
+                       (isAuthenticated() &&
+                        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reportCount', 'status']));
+      allow delete: if isAuthor();
+    }
+
+    // Comment Reports collection
+    match /commentReports/{reportId} {
+      allow create: if isAuthenticated() && request.resource.data.reporterUserId == request.auth.uid;
+      allow read, update, delete: if isEditor();
+    }
+
+    // Reader Messages (Correspondence from /contact)
+    match /messages/{messageId} {
+      allow create: if true; // Public contact form
+      allow read, update, delete: if isEditor();
+    }
+
+    // Site Content (Managed live content from /admin/site)
+    match /siteContent/{contentId} {
+      allow read: if true;
+      allow write: if isAuthor();
+    }
+
+    // Books collection
+    match /books/{bookId} {
+      allow read: if resource == null || 
+                     resource.data.publicationState == 'PUBLIC' || 
+                     resource.data.publicationState == 'TEASER' || 
+                     resource.data.status == 'published' || 
+                     isEditor();
+      allow update: if isEditor();
+      allow create, delete: if isAuthor();
+    }
+
+    // Series collection
+    match /series/{seriesId} {
+      allow read: if true;
+      allow update: if isEditor();
+      allow create, delete: if isAuthor();
+    }
+
+    // Stories collection
+    match /stories/{storyId} {
+      allow read: if true;
+      allow write: if isAuthor();
+    }
+
+    // News collection
+    match /news/{newsId} {
+      allow read: if true;
+      allow write: if isAuthor();
+    }
+
+    // Media library collection
+    match /media/{mediaId} {
+      allow read: if true;
+      allow write: if isEditor();
+    }
+
+    // Newsletter Subscribers
+    match /subscribers/{subscriberId} {
+      allow create: if request.resource.data.email is string && 
+                       request.resource.data.consentGiven == true;
+      allow update: if isAuthor() || 
+                       (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'unsubscribedAt']) &&
+                        request.resource.data.status == 'unsubscribed');
+      allow read, delete: if isAuthor();
+    }
+
+    // Newsletters collection: author-only
+    match /newsletters/{newsletterId} {
+      allow read, write: if isAuthor();
+    }
+
+    // Audit logs collection
+    match /auditLogs/{logId} {
+      allow read, create: if isEditor();
+      allow update, delete: if false;
+    }
+
+    // Global site settings
+    match /siteSettings/{settingId} {
+      allow read: if true;
+      allow write: if isAuthor();
+    }
+
+    // Short Videos collection
+    match /videos/{videoId} {
+      allow read: if resource == null ||
+                     resource.data.status in ['published', 'PUBLISHED'] ||
+                     isEditor();
+      allow create: if isEditor();
+      allow update: if isEditor() ||
+                       (resource != null &&
+                        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['viewCount']));
+      allow delete: if isAuthor();
+    }
+  }
+}

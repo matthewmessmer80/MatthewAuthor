@@ -1,0 +1,8 @@
+{
+  "name": "Matthew E. Messmer | Official Author Website",
+  "description": "Stories Woven Through Time. Official author website of Matthew E. Messmer, creator of The Breathwoven Cycle, The Abyssal Current, and handcrafted physical artwork.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

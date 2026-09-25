@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-cinzel: 'Cinzel', serif;
+    --font-cormorant: 'Cormorant Garamond', Georgia, serif;
+    --font-serif: 'Source Serif 4', Georgia, serif;
+    --font-sans: 'Plus Jakarta Sans', system-ui, sans-serif;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    font-family: var(--font-sans);
+  }
+}
+
+.font-cinzel {
+  font-family: var(--font-cinzel);
+}
+
+.font-cormorant {
+  font-family: var(--font-cormorant);
+}
+
+.font-reading {
+  font-family: var(--font-serif);
+}
+
+/* Subtle woven thread background pattern */
+.bg-woven-pattern {
+  background-image: radial-gradient(rgba(197, 160, 89, 0.08) 1px, transparent 1px),
+                    radial-gradient(rgba(197, 160, 89, 0.04) 1px, transparent 1px);
+  background-size: 32px 32px;
+  background-position: 0 0, 16px 16px;
+}
+
+/* Wood grain & parchment subtle grain */
+.bg-parchment {
+  background-color: #f7f4ed;
+  color: #1e1b18;
+}
+
+.bg-parchment-dark {
+  background-color: #14161f;
+  color: #e5ded3;
+}
+
+/* Editorial Drop Cap */
+.drop-cap-lead::first-letter {
+  font-family: var(--font-cinzel);
+  font-size: 3.75rem;
+  line-height: 0.85;
+  float: left;
+  margin-right: 0.75rem;
+  margin-top: 0.35rem;
+  color: #c5a059;
+}
+

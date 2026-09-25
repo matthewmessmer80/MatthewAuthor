@@ -1,0 +1,8 @@
+# Robots.txt for Matthew E. Messmer Official Author Website
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /api/
+
+# Sitemap location
+Sitemap: /sitemap.xml
