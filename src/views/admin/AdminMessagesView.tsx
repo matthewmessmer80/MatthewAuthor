@@ -45,13 +45,21 @@ export const AdminMessagesView: React.FC = () => {
 
   useEffect(() => {
     loadMessages();
+    const unsub = messageService.subscribe((data) => {
+      setMessages(data);
+      setLoading(false);
+      setSelectedMessage((prev) => {
+        if (!prev) return null;
+        return data.find((m) => m.id === prev.id) || null;
+      });
+    });
+    return () => unsub();
   }, []);
 
   const handleSelect = async (msg: ReaderMessage) => {
     setSelectedMessage(msg);
-    if (msg.status === 'unread') {
+    if (msg.status === 'unread' || (msg as any).isRead === false) {
       await messageService.markAsRead(msg.id);
-      await loadMessages();
     }
   };
 
@@ -89,10 +97,13 @@ export const AdminMessagesView: React.FC = () => {
 
   const filteredMessages = messages.filter((m) => {
     if (filter === 'all') return m.status !== 'archived';
+    if (filter === 'unread') return (m.status === 'unread' || (m as any).isRead === false) && m.status !== 'archived';
     return m.status === filter;
   });
 
-  const unreadCount = messages.filter((m) => m.status === 'unread').length;
+  const unreadCount = messages.filter(
+    (m) => (m.status === 'unread' || (m as any).isRead === false) && m.status !== 'archived'
+  ).length;
 
   return (
     <div className="space-y-8">

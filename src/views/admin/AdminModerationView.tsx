@@ -74,6 +74,17 @@ export const AdminModerationView: React.FC = () => {
 
   useEffect(() => {
     loadData();
+    const unsubComments = commentService.subscribe((list) => {
+      setComments(list);
+      setLoading(false);
+    });
+    const unsubReports = commentService.subscribeReports((list) => {
+      setReports(list);
+    });
+    return () => {
+      unsubComments();
+      unsubReports();
+    };
   }, []);
 
   const handleUpdateStatus = async (commentId: string, status: CommentStatus) => {
@@ -183,8 +194,8 @@ export const AdminModerationView: React.FC = () => {
     return `${diffMinutes}m remaining`;
   };
 
-  const pendingComments = comments.filter((c) => c.status === 'PENDING');
-  const flaggedComments = comments.filter((c) => c.status === 'FLAGGED');
+  const pendingComments = comments.filter((c) => c.status === 'PENDING' || (c.status as string)?.toLowerCase() === 'pending');
+  const flaggedComments = comments.filter((c) => c.status === 'FLAGGED' || (c.status as string)?.toLowerCase() === 'flagged');
   const holdingComments = comments.filter((c) => c.status === 'REMOVED_PENDING_DELETION');
   // Expiring soon: comments in holding with <= 3 days remaining or sorted by nearest expiration
   const expiringSoonComments = [...holdingComments].sort((a, b) => {
@@ -192,7 +203,7 @@ export const AdminModerationView: React.FC = () => {
     const timeB = b.scheduledDeletionAt ? new Date(b.scheduledDeletionAt).getTime() : 0;
     return timeA - timeB;
   });
-  const activeReports = reports.filter((r) => r.status === 'PENDING_REVIEW');
+  const activeReports = reports.filter((r) => r.status === 'PENDING_REVIEW' || (r.status as string)?.toLowerCase() === 'pending_review');
 
   return (
     <div className="space-y-8 animate-in fade-in duration-200">

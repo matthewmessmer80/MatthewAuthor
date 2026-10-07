@@ -161,14 +161,24 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 
     // Fetch moderation and messages stats
     try {
-      const comms = await commentService.getAllComments();
-      const reps = await commentService.getAllReports();
-      const msgs = await messageService.getMessages();
+      const [comms, reps, msgs] = await Promise.all([
+        commentService.getAllComments(),
+        commentService.getAllReports(),
+        messageService.getMessages(),
+      ]);
 
-      setPendingCommentsCount(comms.filter((c) => c.status === 'PENDING').length);
-      setFlaggedCommentsCount(comms.filter((c) => c.status === 'FLAGGED').length);
-      setReportsCount(reps.filter((r) => r.status === 'PENDING_REVIEW').length);
-      setUnreadMessagesCount(msgs.filter((m) => m.status === 'unread').length);
+      setPendingCommentsCount(
+        comms.filter((c) => c.status === 'PENDING' || (c.status as string)?.toLowerCase() === 'pending').length
+      );
+      setFlaggedCommentsCount(
+        comms.filter((c) => c.status === 'FLAGGED' || (c.status as string)?.toLowerCase() === 'flagged').length
+      );
+      setReportsCount(
+        reps.filter((r) => r.status === 'PENDING_REVIEW' || (r.status as string)?.toLowerCase() === 'pending_review').length
+      );
+      setUnreadMessagesCount(
+        msgs.filter((m) => (m.status === 'unread' || (m as any).isRead === false) && m.status !== 'archived').length
+      );
     } catch {}
   };
 
@@ -188,6 +198,32 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
     const unsubLore = characterLoreService.subscribeLore((list) => setLoreCount(list.length));
     const unsubSongs = songService.subscribe((list) => setSongsCount(list.length));
 
+    // Dynamic reactive subscriptions for Messages & Moderation badges
+    const unsubMessages = messageService.subscribe((list) => {
+      const unread = list.filter(
+        (m) => (m.status === 'unread' || (m as any).isRead === false) && m.status !== 'archived'
+      ).length;
+      setUnreadMessagesCount(unread);
+    });
+
+    const unsubComments = commentService.subscribe((list) => {
+      const pending = list.filter(
+        (c) => c.status === 'PENDING' || (c.status as string)?.toLowerCase() === 'pending'
+      ).length;
+      const flagged = list.filter(
+        (c) => c.status === 'FLAGGED' || (c.status as string)?.toLowerCase() === 'flagged'
+      ).length;
+      setPendingCommentsCount(pending);
+      setFlaggedCommentsCount(flagged);
+    });
+
+    const unsubReports = commentService.subscribeReports((list) => {
+      const rep = list.filter(
+        (r) => r.status === 'PENDING_REVIEW' || (r.status as string)?.toLowerCase() === 'pending_review'
+      ).length;
+      setReportsCount(rep);
+    });
+
     return () => {
       unsubBooks();
       unsubNews();
@@ -195,6 +231,9 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       unsubChars();
       unsubLore();
       unsubSongs();
+      unsubMessages();
+      unsubComments();
+      unsubReports();
     };
   }, []);
 
@@ -212,13 +251,13 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
     return <Sparkles {...props} />;
   }
 
-  // Navigation items: Strictly role-aware
+  // Navigation items: Strictly role-aware with accurate filtered badges
   const authorNavItems = [
     { id: 'dashboard', label: 'Dashboard', icon: Home },
     { id: 'site-editor', label: 'Site Editor', icon: Globe },
     { id: 'users', label: 'User Management', icon: Users },
-    { id: 'moderation', label: 'Moderation', icon: ShieldAlert, badge: pendingCommentsCount + flaggedCommentsCount },
-    { id: 'messages', label: 'Messages', icon: Mail, badge: unreadMessagesCount },
+    { id: 'moderation', label: 'Moderation', icon: ShieldAlert, badge: pendingCommentsCount > 0 ? pendingCommentsCount : undefined },
+    { id: 'messages', label: 'Messages', icon: Mail, badge: unreadMessagesCount > 0 ? unreadMessagesCount : undefined },
     { id: 'books', label: 'Books', icon: BookOpen, badge: books.length > 0 ? books.length : undefined },
     { id: 'series', label: 'Series', icon: Layers, badge: seriesList.length > 0 ? seriesList.length : undefined },
     { id: 'stories', label: 'Short Stories', icon: FeatherIcon },
@@ -235,8 +274,8 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 
   const editorNavItems = [
     { id: 'dashboard', label: 'Editor Dashboard', icon: Home },
-    { id: 'moderation', label: 'Moderation', icon: ShieldAlert, badge: pendingCommentsCount + flaggedCommentsCount },
-    { id: 'messages', label: 'Messages', icon: Mail, badge: unreadMessagesCount },
+    { id: 'moderation', label: 'Moderation', icon: ShieldAlert, badge: pendingCommentsCount > 0 ? pendingCommentsCount : undefined },
+    { id: 'messages', label: 'Messages', icon: Mail, badge: unreadMessagesCount > 0 ? unreadMessagesCount : undefined },
     { id: 'books', label: 'Books', icon: BookOpen, badge: books.length > 0 ? books.length : undefined },
     { id: 'series', label: 'Series', icon: Layers, badge: seriesList.length > 0 ? seriesList.length : undefined },
     { id: 'stories', label: 'Short Stories', icon: FeatherIcon },
@@ -660,7 +699,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                       <ShieldAlert className="w-4 h-4 text-amber-400" />
                     </div>
                     <div className="text-3xl font-cinzel font-bold text-[#f5efeb]">
-                      {pendingCommentsCount + flaggedCommentsCount}
+                      {pendingCommentsCount}
                     </div>
                     <div className="text-[11px] text-[#7d776a]">
                       {pendingCommentsCount} pending · {flaggedCommentsCount} flagged

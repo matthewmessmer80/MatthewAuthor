@@ -5,6 +5,8 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
+  onSnapshot,
+  Unsubscribe,
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { ReaderMessage } from '../types';
@@ -12,32 +14,13 @@ import { ReaderMessage } from '../types';
 const MESSAGES_COLLECTION = 'messages';
 const LOCAL_STORAGE_MESSAGES_KEY = 'mmessmer_author_reader_messages';
 
-const INITIAL_SEEDED_MESSAGES: ReaderMessage[] = [
-  {
-    id: 'msg-1',
-    name: 'Eleanor Vance',
-    email: 'eleanor.vance@readerguild.org',
-    inquiryType: 'reader',
-    subject: 'Book Club Discussion Guide for The King\'s Severance',
-    message: 'Hello Matthew, our speculative fiction book club in Austin is reading The King\'s Severance next month. Do you offer an official reading guide or list of discussion questions for the loom and tapestry motifs?',
-    createdAt: '2024-09-21T14:15:00Z',
-    status: 'unread',
-  },
-  {
-    id: 'msg-2',
-    name: 'Marcus Brody',
-    email: 'marcus.brody@texashistorypress.com',
-    inquiryType: 'event',
-    subject: 'Virtual Author Guest Speaker Invitation - November',
-    message: 'Greetings Matthew. We would love to host you for a 45-minute virtual conversation regarding the intersection of physical craft and worldbuilding in epic fantasy. Let us know your availability.',
-    createdAt: '2024-09-18T09:30:00Z',
-    status: 'read',
-    replyNotes: 'Reviewing November writing milestones before confirming.',
-  },
-];
+export type MessageListener = (messages: ReaderMessage[]) => void;
 
 class MessageService {
   private messages: ReaderMessage[] = [];
+  private listeners: Set<MessageListener> = new Set();
+  private unsubscribeSnapshot: Unsubscribe | null = null;
+  private hasInitializedRealtime = false;
 
   constructor() {
     this.loadState();
@@ -47,20 +30,91 @@ class MessageService {
     try {
       const stored = localStorage.getItem(LOCAL_STORAGE_MESSAGES_KEY);
       if (stored) {
-        this.messages = JSON.parse(stored);
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          // Filter out legacy hardcoded test mock items
+          this.messages = parsed.filter(
+            (m: any) => m && m.id !== 'msg-1' && m.id !== 'msg-2'
+          );
+        } else {
+          this.messages = [];
+        }
       } else {
-        this.messages = [...INITIAL_SEEDED_MESSAGES];
-        this.saveState();
+        this.messages = [];
       }
     } catch {
-      this.messages = [...INITIAL_SEEDED_MESSAGES];
+      this.messages = [];
     }
+
+    this.saveState();
+    this.initRealtime();
   }
 
   private saveState(): void {
     try {
       localStorage.setItem(LOCAL_STORAGE_MESSAGES_KEY, JSON.stringify(this.messages));
     } catch {}
+  }
+
+  private notify(): void {
+    const copy = [...this.messages];
+    this.listeners.forEach((fn) => {
+      try {
+        fn(copy);
+      } catch (err) {
+        console.error('Error notifying message listener:', err);
+      }
+    });
+  }
+
+  subscribe(listener: MessageListener): () => void {
+    this.listeners.add(listener);
+    // Immediately emit current cached state
+    listener([...this.messages]);
+    if (!this.hasInitializedRealtime) {
+      this.initRealtime();
+    }
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  initRealtime(): void {
+    if (this.unsubscribeSnapshot) {
+      this.unsubscribeSnapshot();
+      this.unsubscribeSnapshot = null;
+    }
+    try {
+      this.unsubscribeSnapshot = onSnapshot(
+        collection(db, MESSAGES_COLLECTION),
+        (snap) => {
+          this.hasInitializedRealtime = true;
+          const firestoreList: ReaderMessage[] = [];
+          snap.forEach((d) => {
+            const data = d.data();
+            firestoreList.push({
+              ...(data as ReaderMessage),
+              id: d.id,
+              status: (data.status as any) || (data.isRead === false ? 'unread' : 'read'),
+            });
+          });
+
+          firestoreList.sort(
+            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          );
+
+          this.messages = firestoreList;
+          this.saveState();
+          this.notify();
+        },
+        (err) => {
+          // Log permission restrictions when not authenticated as editor/author
+          console.warn('Realtime messages listener unavailable (or permission restricted):', err.message);
+        }
+      );
+    } catch (err) {
+      console.warn('Could not initialize realtime messages listener:', err);
+    }
   }
 
   async sendMessage(data: {
@@ -83,6 +137,7 @@ class MessageService {
 
     this.messages.unshift(newMessage);
     this.saveState();
+    this.notify();
 
     try {
       await setDoc(doc(db, MESSAGES_COLLECTION, newMessage.id), newMessage);
@@ -96,30 +151,49 @@ class MessageService {
   async getMessages(): Promise<ReaderMessage[]> {
     try {
       const snap = await getDocs(collection(db, MESSAGES_COLLECTION));
-      if (!snap.empty) {
-        const firestoreList: ReaderMessage[] = [];
-        snap.forEach((d) => firestoreList.push({ ...(d.data() as ReaderMessage), id: d.id }));
-        firestoreList.forEach((fm) => {
-          const idx = this.messages.findIndex((m) => m.id === fm.id);
-          if (idx >= 0) this.messages[idx] = fm;
-          else this.messages.push(fm);
+      const firestoreList: ReaderMessage[] = [];
+      snap.forEach((d) => {
+        const data = d.data();
+        firestoreList.push({
+          ...(data as ReaderMessage),
+          id: d.id,
+          status: (data.status as any) || (data.isRead === false ? 'unread' : 'read'),
         });
-        this.saveState();
-      }
-    } catch {}
+      });
+      firestoreList.sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+      this.messages = firestoreList;
+      this.saveState();
+      this.notify();
+    } catch (err) {
+      console.warn('Could not fetch messages from Firestore (using cached state):', err);
+    }
 
     return [...this.messages].sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
   }
 
+  getUnreadCount(): number {
+    return this.messages.filter((m) => {
+      if (m.status === 'archived') return false;
+      return m.status === 'unread' || (m as any).isRead === false;
+    }).length;
+  }
+
   async markAsRead(messageId: string): Promise<void> {
     const msg = this.messages.find((m) => m.id === messageId);
-    if (msg && msg.status === 'unread') {
+    if (msg && (msg.status === 'unread' || (msg as any).isRead === false)) {
       msg.status = 'read';
+      (msg as any).isRead = true;
       this.saveState();
+      this.notify();
       try {
-        await updateDoc(doc(db, MESSAGES_COLLECTION, messageId), { status: 'read' });
+        await updateDoc(doc(db, MESSAGES_COLLECTION, messageId), {
+          status: 'read',
+          isRead: true,
+        });
       } catch {}
     }
   }
@@ -135,7 +209,9 @@ class MessageService {
       msg.replyNotes = replyNotes;
       msg.repliedBy = repliedBy;
       msg.repliedAt = new Date().toISOString();
+      (msg as any).isRead = true;
       this.saveState();
+      this.notify();
 
       try {
         await updateDoc(doc(db, MESSAGES_COLLECTION, messageId), {
@@ -143,6 +219,7 @@ class MessageService {
           replyNotes,
           repliedBy,
           repliedAt: msg.repliedAt,
+          isRead: true,
         });
       } catch {}
     }
@@ -153,6 +230,7 @@ class MessageService {
     if (msg) {
       msg.status = 'archived';
       this.saveState();
+      this.notify();
       try {
         await updateDoc(doc(db, MESSAGES_COLLECTION, messageId), { status: 'archived' });
       } catch {}
@@ -167,6 +245,7 @@ class MessageService {
     if (idx >= 0) {
       this.messages.splice(idx, 1);
       this.saveState();
+      this.notify();
     }
 
     try {
@@ -181,3 +260,4 @@ class MessageService {
 }
 
 export const messageService = new MessageService();
+

@@ -10,6 +10,8 @@ import {
   where,
   orderBy,
   serverTimestamp,
+  onSnapshot,
+  Unsubscribe,
 } from 'firebase/firestore';
 import { db } from './firebase';
 import {
@@ -27,6 +29,9 @@ const REPORTS_COLLECTION = 'commentReports';
 const AUDIT_LOGS_COLLECTION = 'auditLogs';
 const LOCAL_STORAGE_COMMENTS_KEY = 'mmessmer_author_book_comments';
 const LOCAL_STORAGE_REPORTS_KEY = 'mmessmer_author_comment_reports';
+
+export type CommentListener = (comments: BookComment[]) => void;
+export type ReportListener = (reports: CommentReport[]) => void;
 
 const INITIAL_SEEDED_COMMENTS: BookComment[] = [
   {
@@ -78,56 +83,18 @@ const INITIAL_SEEDED_COMMENTS: BookComment[] = [
     thematicTier: 'Deeply Captivating / Essential',
     thematicScore: 4,
   },
-  {
-    id: 'comm-3-pending',
-    bookId: 'kings-severance',
-    bookTitle: "The King's Severance",
-    bookSlug: 'the-kings-severance',
-    userId: 'reader-pending-guest',
-    userName: 'Rowan Vance',
-    userRole: 'READER',
-    content: "Is there any planned companion map showing the trade currents from the southern isles to the capital?",
-    status: 'PENDING',
-    createdAt: '2024-09-24T11:15:00Z',
-    replyCount: 0,
-    reportCount: 0,
-  },
-  {
-    id: 'comm-4-flagged',
-    bookId: 'blue-moon-child',
-    bookTitle: 'The Blue Moon Child',
-    bookSlug: 'the-blue-moon-child',
-    userId: 'reader-suspicious',
-    userName: 'MysteryUser42',
-    userRole: 'READER',
-    content: 'Check out cheap book downloads on this external link here: bit.ly/spam-link',
-    status: 'FLAGGED',
-    createdAt: '2024-09-22T08:30:00Z',
-    replyCount: 0,
-    reportCount: 2,
-    moderationNotes: 'Reported as Spam by 2 readers.',
-  },
 ];
 
-const INITIAL_SEEDED_REPORTS: CommentReport[] = [
-  {
-    id: 'rep-1',
-    commentId: 'comm-4-flagged',
-    commentContent: 'Check out cheap book downloads on this external link here: bit.ly/spam-link',
-    bookId: 'blue-moon-child',
-    bookTitle: 'The Blue Moon Child',
-    reporterUserId: 'user-samuel-k',
-    reporterEmail: 'samuel.kaye@gmail.com',
-    reason: 'Spam',
-    details: 'Suspicious external link posted in discussion.',
-    status: 'PENDING_REVIEW',
-    createdAt: '2024-09-22T08:45:00Z',
-  },
-];
+const INITIAL_SEEDED_REPORTS: CommentReport[] = [];
 
 class CommentService {
   private comments: BookComment[] = [];
   private reports: CommentReport[] = [];
+  private commentListeners: Set<CommentListener> = new Set();
+  private reportListeners: Set<ReportListener> = new Set();
+  private unsubscribeComments: Unsubscribe | null = null;
+  private unsubscribeReports: Unsubscribe | null = null;
+  private hasInitializedRealtime = false;
 
   constructor() {
     this.loadState();
@@ -137,10 +104,17 @@ class CommentService {
     try {
       const storedComments = localStorage.getItem(LOCAL_STORAGE_COMMENTS_KEY);
       if (storedComments) {
-        this.comments = JSON.parse(storedComments);
+        const parsed = JSON.parse(storedComments);
+        if (Array.isArray(parsed)) {
+          // Filter out legacy mock pending/flagged test items
+          this.comments = parsed.filter(
+            (c: any) => c && c.id !== 'comm-3-pending' && c.id !== 'comm-4-flagged'
+          );
+        } else {
+          this.comments = [...INITIAL_SEEDED_COMMENTS];
+        }
       } else {
         this.comments = [...INITIAL_SEEDED_COMMENTS];
-        this.saveComments();
       }
     } catch {
       this.comments = [...INITIAL_SEEDED_COMMENTS];
@@ -149,14 +123,22 @@ class CommentService {
     try {
       const storedReports = localStorage.getItem(LOCAL_STORAGE_REPORTS_KEY);
       if (storedReports) {
-        this.reports = JSON.parse(storedReports);
+        const parsed = JSON.parse(storedReports);
+        if (Array.isArray(parsed)) {
+          this.reports = parsed.filter((r: any) => r && r.id !== 'rep-1');
+        } else {
+          this.reports = [];
+        }
       } else {
-        this.reports = [...INITIAL_SEEDED_REPORTS];
-        this.saveReports();
+        this.reports = [];
       }
     } catch {
-      this.reports = [...INITIAL_SEEDED_REPORTS];
+      this.reports = [];
     }
+
+    this.saveComments();
+    this.saveReports();
+    this.initRealtime();
   }
 
   private saveComments(): void {
@@ -169,6 +151,104 @@ class CommentService {
     try {
       localStorage.setItem(LOCAL_STORAGE_REPORTS_KEY, JSON.stringify(this.reports));
     } catch {}
+  }
+
+  private notifyComments(): void {
+    const copy = [...this.comments];
+    this.commentListeners.forEach((fn) => {
+      try {
+        fn(copy);
+      } catch (err) {
+        console.error('Error notifying comment listener:', err);
+      }
+    });
+  }
+
+  private notifyReports(): void {
+    const copy = [...this.reports];
+    this.reportListeners.forEach((fn) => {
+      try {
+        fn(copy);
+      } catch (err) {
+        console.error('Error notifying report listener:', err);
+      }
+    });
+  }
+
+  subscribe(listener: CommentListener): () => void {
+    this.commentListeners.add(listener);
+    listener([...this.comments]);
+    if (!this.hasInitializedRealtime) {
+      this.initRealtime();
+    }
+    return () => {
+      this.commentListeners.delete(listener);
+    };
+  }
+
+  subscribeReports(listener: ReportListener): () => void {
+    this.reportListeners.add(listener);
+    listener([...this.reports]);
+    if (!this.hasInitializedRealtime) {
+      this.initRealtime();
+    }
+    return () => {
+      this.reportListeners.delete(listener);
+    };
+  }
+
+  initRealtime(): void {
+    if (this.unsubscribeComments) {
+      this.unsubscribeComments();
+      this.unsubscribeComments = null;
+    }
+    if (this.unsubscribeReports) {
+      this.unsubscribeReports();
+      this.unsubscribeReports = null;
+    }
+
+    try {
+      this.unsubscribeComments = onSnapshot(
+        collection(db, COMMENTS_COLLECTION),
+        (snap) => {
+          this.hasInitializedRealtime = true;
+          const list: BookComment[] = [];
+          snap.forEach((d) => {
+            list.push({ ...(d.data() as BookComment), id: d.id });
+          });
+          list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          this.comments = list;
+          this.saveComments();
+          this.notifyComments();
+        },
+        (err) => {
+          console.warn('Realtime comments listener notice:', err.message);
+        }
+      );
+    } catch (err) {
+      console.warn('Could not initialize realtime comments listener:', err);
+    }
+
+    try {
+      this.unsubscribeReports = onSnapshot(
+        collection(db, REPORTS_COLLECTION),
+        (snap) => {
+          const list: CommentReport[] = [];
+          snap.forEach((d) => {
+            list.push({ ...(d.data() as CommentReport), id: d.id });
+          });
+          list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          this.reports = list;
+          this.saveReports();
+          this.notifyReports();
+        },
+        (err) => {
+          console.warn('Realtime comment reports listener notice:', err.message);
+        }
+      );
+    } catch (err) {
+      console.warn('Could not initialize realtime reports listener:', err);
+    }
   }
 
   /**
@@ -412,6 +492,7 @@ class CommentService {
 
     this.comments.push(newComment);
     this.saveComments();
+    this.notifyComments();
 
     try {
       const commentRef = doc(db, COMMENTS_COLLECTION, newComment.id);
@@ -466,6 +547,8 @@ class CommentService {
     this.reports.unshift(report);
     this.saveComments();
     this.saveReports();
+    this.notifyComments();
+    this.notifyReports();
 
     try {
       await updateDoc(doc(db, COMMENTS_COLLECTION, comment.id), {
@@ -487,17 +570,15 @@ class CommentService {
   async getAllComments(): Promise<BookComment[]> {
     try {
       const snap = await getDocs(collection(db, COMMENTS_COLLECTION));
-      if (!snap.empty) {
-        const list: BookComment[] = [];
-        snap.forEach((d) => list.push({ ...(d.data() as BookComment), id: d.id }));
-        list.forEach((fc) => {
-          const idx = this.comments.findIndex((c) => c.id === fc.id);
-          if (idx >= 0) this.comments[idx] = fc;
-          else this.comments.push(fc);
-        });
-        this.saveComments();
-      }
-    } catch {}
+      const list: BookComment[] = [];
+      snap.forEach((d) => list.push({ ...(d.data() as BookComment), id: d.id }));
+      list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      this.comments = list;
+      this.saveComments();
+      this.notifyComments();
+    } catch (err) {
+      console.warn('Could not fetch comments from Firestore (using cache):', err);
+    }
     return [...this.comments].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 
@@ -507,14 +588,37 @@ class CommentService {
   async getAllReports(): Promise<CommentReport[]> {
     try {
       const snap = await getDocs(collection(db, REPORTS_COLLECTION));
-      if (!snap.empty) {
-        const list: CommentReport[] = [];
-        snap.forEach((d) => list.push({ ...(d.data() as CommentReport), id: d.id }));
-        this.reports = list;
-        this.saveReports();
-      }
-    } catch {}
+      const list: CommentReport[] = [];
+      snap.forEach((d) => list.push({ ...(d.data() as CommentReport), id: d.id }));
+      list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      this.reports = list;
+      this.saveReports();
+      this.notifyReports();
+    } catch (err) {
+      console.warn('Could not fetch reports from Firestore (using cache):', err);
+    }
     return [...this.reports].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  /**
+   * Helper counts
+   */
+  getPendingCommentsCount(): number {
+    return this.comments.filter(
+      (c) => c.status === 'PENDING' || (c.status as string)?.toLowerCase() === 'pending'
+    ).length;
+  }
+
+  getFlaggedCommentsCount(): number {
+    return this.comments.filter(
+      (c) => c.status === 'FLAGGED' || (c.status as string)?.toLowerCase() === 'flagged'
+    ).length;
+  }
+
+  getPendingReportsCount(): number {
+    return this.reports.filter(
+      (r) => r.status === 'PENDING_REVIEW' || (r.status as string)?.toLowerCase() === 'pending_review'
+    ).length;
   }
 
   /**
@@ -537,6 +641,7 @@ class CommentService {
     if (notes) comment.moderationNotes = notes;
 
     this.saveComments();
+    this.notifyComments();
 
     try {
       await updateDoc(doc(db, COMMENTS_COLLECTION, commentId), {
@@ -585,6 +690,7 @@ class CommentService {
     comment.moderatedAt = now.toISOString();
 
     this.saveComments();
+    this.notifyComments();
 
     try {
       await updateDoc(doc(db, COMMENTS_COLLECTION, params.commentId), {
@@ -644,6 +750,7 @@ class CommentService {
     comment.moderatedAt = new Date().toISOString();
 
     this.saveComments();
+    this.notifyComments();
 
     try {
       await updateDoc(doc(db, COMMENTS_COLLECTION, params.commentId), {
@@ -690,6 +797,7 @@ class CommentService {
     if (idx >= 0) {
       this.comments.splice(idx, 1);
       this.saveComments();
+      this.notifyComments();
     }
 
     try {
@@ -759,6 +867,7 @@ class CommentService {
     }
 
     this.saveComments();
+    this.notifyComments();
     return { deletedCount: expiredComments.length };
   }
 
@@ -778,6 +887,7 @@ class CommentService {
     rep.resolvedAt = new Date().toISOString();
 
     this.saveReports();
+    this.notifyReports();
 
     try {
       await updateDoc(doc(db, REPORTS_COLLECTION, reportId), {
