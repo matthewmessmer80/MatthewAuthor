@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Book } from '../types';
-import { coverImageService } from '../services/coverImageService';
+import { bookService } from '../services/bookService';
 
 interface BookCoverArtProps {
-  book: Book;
-  size?: 'sm' | 'md' | 'lg' | 'xl';
+  book: Book | any;
+  size?: 'sm' | 'md' | 'lg' | 'xl' | 'fill';
   className?: string;
   showHoverEffect?: boolean;
 }
@@ -15,39 +15,67 @@ export const BookCoverArt: React.FC<BookCoverArtProps> = ({
   className = '',
   showHoverEffect = true,
 }) => {
-  const [customCover, setCustomCover] = useState<string | null>(
-    coverImageService.getCover(book.id)
-  );
+  const getAuthoritativeCover = (): string | null => {
+    if (!book?.id) return (book as any)?.coverImage || null;
+    const liveBook = bookService.getCachedBookById(book.id);
+    return liveBook?.coverImage || (book as any)?.coverImage || null;
+  };
+
+  const [effectiveCover, setEffectiveCover] = useState<string | null>(getAuthoritativeCover);
+  const [imgError, setImgError] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = coverImageService.subscribe(() => {
-      setCustomCover(coverImageService.getCover(book.id));
-    });
-    return unsubscribe;
-  }, [book.id]);
+    const syncCover = () => {
+      const cover = getAuthoritativeCover();
+      setEffectiveCover(cover);
+      setImgError(false);
+    };
+    syncCover();
 
-  const sizeClasses = {
-    sm: 'w-28 h-40',
-    md: 'w-44 h-64 sm:w-52 sm:h-76',
-    lg: 'w-60 h-88 sm:w-72 sm:h-[420px]',
-    xl: 'w-72 h-[420px] sm:w-80 sm:h-[480px]',
-  }[size];
+    if (!book?.id) return;
+    const unsubBook = bookService.subscribe(syncCover);
+    return () => {
+      unsubBook();
+    };
+  }, [book?.id, (book as any)?.coverImage]);
+
+  useEffect(() => {
+    setImgError(false);
+  }, [effectiveCover]);
+
+  // Determine if the caller requested filling the parent container
+  const isFill = size === 'fill' || className.includes('w-full') || className.includes('h-full');
+
+  // Default standard book cover aspect ratio is 2:3 (golden ratio for paperbacks & hardcovers)
+  const defaultSizeClasses: Record<string, string> = {
+    sm: 'w-28 aspect-[2/3]',
+    md: 'w-44 sm:w-52 aspect-[2/3]',
+    lg: 'w-60 sm:w-72 aspect-[2/3]',
+    xl: 'w-72 sm:w-80 aspect-[2/3]',
+    fill: 'w-full h-full',
+  };
+
+  const dimensionClasses = isFill ? 'w-full h-full' : (defaultSizeClasses[size] || defaultSizeClasses.md);
 
   // If a custom image was uploaded by the user or saved in storage
-  if (customCover) {
+  if (effectiveCover && !imgError) {
     return (
       <div
-        className={`relative ${sizeClasses} rounded-md shadow-2xl overflow-hidden border border-[#2b2e40] bg-[#090b10] ${
+        className={`relative ${dimensionClasses} rounded-md shadow-2xl overflow-hidden border border-[#2b2e40] bg-[#090b10] ${
           showHoverEffect ? 'transition-transform duration-300 hover:-translate-y-1.5' : ''
         } ${className}`}
       >
         <img
-          src={customCover}
-          alt={`Cover of ${book.title} by Matthew E. Messmer`}
-          className="w-full h-full object-cover object-center"
+          key={effectiveCover || book?.id}
+          src={effectiveCover}
+          alt={(book as any)?.coverImageAlt || `Cover of ${book?.title || 'Book'} by Matthew E. Messmer`}
+          onError={() => setImgError(true)}
+          className="w-full h-full object-cover object-center block"
+          loading="lazy"
         />
         {/* Subtle book spine lighting effect */}
         <div className="absolute top-0 bottom-0 left-0 w-3 bg-gradient-to-r from-black/60 to-transparent pointer-events-none" />
+        <div className="absolute inset-0 rounded-md ring-1 ring-inset ring-white/10 pointer-events-none" />
       </div>
     );
   }
@@ -530,11 +558,14 @@ export const BookCoverArt: React.FC<BookCoverArtProps> = ({
 
   return (
     <div
-      className={`relative ${sizeClasses} rounded-md shadow-2xl overflow-hidden ${
+      className={`relative ${dimensionClasses} rounded-md shadow-2xl overflow-hidden border border-[#2b2e40] bg-[#090b10] ${
         showHoverEffect ? 'transition-transform duration-300 hover:-translate-y-1.5' : ''
       } ${className}`}
     >
       {renderFaithfulArt()}
+      {/* Subtle book spine lighting & book depth effect */}
+      <div className="absolute top-0 bottom-0 left-0 w-3 bg-gradient-to-r from-black/60 to-transparent pointer-events-none" />
+      <div className="absolute inset-0 rounded-md ring-1 ring-inset ring-white/10 pointer-events-none" />
     </div>
   );
 };

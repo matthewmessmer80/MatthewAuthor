@@ -246,19 +246,51 @@ export const AdminBackupView: React.FC = () => {
             </p>
           </div>
 
-          {/* Stories & Lore */}
+          {/* Stories */}
           <div className="p-4 bg-[#11131c] border border-[#232635] rounded-xl space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-cinzel font-semibold text-[#f5efeb] flex items-center gap-2">
-                <Compass className="w-4 h-4 text-[#c5a059]" />
-                Canon Stories & Lore
+                <BookOpen className="w-4 h-4 text-[#c5a059]" />
+                Canon Short Stories
               </span>
               <span className="px-2 py-0.5 bg-[#171924] rounded text-[11px] font-mono text-[#c5a059]">
                 {summary ? `${summary.storiesCount} records` : '...'}
               </span>
             </div>
             <p className="text-[11px] text-[#8e887a] leading-relaxed">
-              All short fiction, metaphysical craft logs, worldbuilding entries, and chapter readings.
+              Standalone and universe short stories, excerpts, and reading times.
+            </p>
+          </div>
+
+          {/* Characters & Lore */}
+          <div className="p-4 bg-[#11131c] border border-[#232635] rounded-xl space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-cinzel font-semibold text-[#f5efeb] flex items-center gap-2">
+                <Compass className="w-4 h-4 text-[#c5a059]" />
+                Characters & Lore
+              </span>
+              <span className="px-2 py-0.5 bg-[#171924] rounded text-[11px] font-mono text-[#c5a059]">
+                {summary ? `${(summary.charactersCount || 0) + (summary.loreCount || 0)} records` : '...'}
+              </span>
+            </div>
+            <p className="text-[11px] text-[#8e887a] leading-relaxed">
+              Dramatis personae, canon biographies, worldbuilding encyclopedia, locations, and magic systems.
+            </p>
+          </div>
+
+          {/* Gallery */}
+          <div className="p-4 bg-[#11131c] border border-[#232635] rounded-xl space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-cinzel font-semibold text-[#f5efeb] flex items-center gap-2">
+                <Database className="w-4 h-4 text-[#c5a059]" />
+                Gallery & Woodcraft
+              </span>
+              <span className="px-2 py-0.5 bg-[#171924] rounded text-[11px] font-mono text-[#c5a059]">
+                {summary ? `${summary.galleryCount || 0} records` : '...'}
+              </span>
+            </div>
+            <p className="text-[11px] text-[#8e887a] leading-relaxed">
+              Workshop laser engravings, book cover art, visual artifacts, and metadata descriptions.
             </p>
           </div>
 

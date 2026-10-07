@@ -6,6 +6,8 @@ import {
   Mail,
   CheckCircle,
   Archive,
+  Trash2,
+  AlertTriangle,
   Reply,
   Clock,
   Sparkles,
@@ -22,6 +24,8 @@ export const AdminMessagesView: React.FC = () => {
   const [replyText, setReplyText] = useState('');
   const [filter, setFilter] = useState<'all' | 'unread' | 'replied' | 'archived'>('all');
   const [toast, setToast] = useState<string | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const moderatorName = profile?.displayName || user?.displayName || `${role} Staff`;
 
@@ -62,9 +66,25 @@ export const AdminMessagesView: React.FC = () => {
 
   const handleArchive = async (msgId: string) => {
     await messageService.archiveMessage(msgId);
-    setToast('Message moved to archive.');
+    setToast('Message moved to archive (can be retrieved from Archived tab).');
     await loadMessages();
     setTimeout(() => setToast(null), 3000);
+  };
+
+  const handleDeleteConfirm = async (msgId: string) => {
+    setIsDeleting(true);
+    try {
+      await messageService.deleteMessage(msgId);
+      setToast('Message permanently deleted from database.');
+      if (selectedMessage?.id === msgId) {
+        setSelectedMessage(null);
+      }
+      setDeleteConfirmId(null);
+      await loadMessages();
+      setTimeout(() => setToast(null), 3000);
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const filteredMessages = messages.filter((m) => {
@@ -207,14 +227,60 @@ export const AdminMessagesView: React.FC = () => {
                   </div>
                 </div>
 
-                <button
-                  onClick={() => handleArchive(selectedMessage.id)}
-                  title="Archive message"
-                  className="p-2 bg-[#161825] hover:bg-[#202334] border border-[#2b2e40] text-[#8f897c] hover:text-[#f5efeb] rounded-lg transition-colors cursor-pointer"
-                >
-                  <Archive className="w-4 h-4" />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleArchive(selectedMessage.id)}
+                    title="Archive message (non-destructive, recoverable)"
+                    className="p-2 bg-[#161825] hover:bg-[#202334] border border-[#2b2e40] text-[#8f897c] hover:text-[#f5efeb] rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 text-xs font-cinzel"
+                  >
+                    <Archive className="w-4 h-4 text-[#8f897c]" />
+                    <span className="hidden sm:inline">Archive</span>
+                  </button>
+
+                  <button
+                    onClick={() => setDeleteConfirmId(selectedMessage.id)}
+                    title="Permanently delete message from database"
+                    className="p-2 bg-[#211618] hover:bg-[#2e1c1f] border border-rose-500/30 text-rose-300 hover:text-rose-100 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 text-xs font-cinzel"
+                  >
+                    <Trash2 className="w-4 h-4 text-rose-400" />
+                    <span className="hidden sm:inline">Delete</span>
+                  </button>
+                </div>
               </div>
+
+              {/* Permanent Deletion Confirmation Banner */}
+              {deleteConfirmId === selectedMessage.id && (
+                <div className="p-4 bg-rose-950/50 border border-rose-500/60 rounded-xl space-y-3 animate-in fade-in">
+                  <div className="flex items-start gap-2.5">
+                    <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                    <div className="space-y-1">
+                      <p className="text-xs font-cinzel font-bold text-rose-200">
+                        Permanently Delete Reader Message?
+                      </p>
+                      <p className="text-[11px] text-rose-300/80 leading-relaxed">
+                        This action is irreversible and permanently removes this inquiry from Firestore. If you wish to keep it for records, use <strong>Archive</strong> instead.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 justify-end">
+                    <button
+                      onClick={() => setDeleteConfirmId(null)}
+                      disabled={isDeleting}
+                      className="px-3 py-1.5 bg-[#171926] hover:bg-[#222536] border border-[#2b2e40] text-[#a8a396] text-xs font-cinzel rounded-lg cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => handleDeleteConfirm(selectedMessage.id)}
+                      disabled={isDeleting}
+                      className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-cinzel font-bold rounded-lg cursor-pointer transition-colors flex items-center gap-1.5 shadow-md shadow-rose-900/30"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>{isDeleting ? 'Deleting...' : 'Yes, Delete Permanently'}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Message Content */}
               <div className="bg-[#141624] border border-[#242738] rounded-xl p-5 text-sm text-[#d6d0c4] leading-relaxed whitespace-pre-wrap">
@@ -246,8 +312,11 @@ export const AdminMessagesView: React.FC = () => {
                 />
                 <div className="flex items-center justify-between">
                   <a
-                    href={`mailto:${selectedMessage.email}?subject=Re: ${encodeURIComponent(selectedMessage.subject)}`}
-                    className="text-xs font-cinzel text-[#c5a059] hover:underline flex items-center gap-1.5"
+                    href="https://mail.google.com/mail/?view=cm&to=breathwovenproductions@gmail.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs font-cinzel text-[#c5a059] hover:underline flex items-center gap-1.5 cursor-pointer"
+                    title="Open Gmail for breathwovenproductions@gmail.com in a new tab"
                   >
                     <Mail className="w-3.5 h-3.5" />
                     <span>Open Email Client</span>

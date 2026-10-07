@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Book, CraftArtwork, NewsArticle } from '../types';
-import { AUTHOR_INFO, BOOKS, CRAFT_ARTWORKS, NEWS_ARTICLES } from '../data/authorData';
+import { AUTHOR_INFO, CRAFT_ARTWORKS, NEWS_ARTICLES } from '../data/authorData';
+import { bookService, managedBookToBook } from '../services/bookService';
 import { siteContentService } from '../services/siteContentService';
 import { BookCard } from '../components/BookCard';
 import { BookCoverArt } from '../components/BookCoverArt';
 import { NewsletterSignup } from '../components/NewsletterSignup';
+import { MonthlyFeaturedWidget } from '../components/MonthlyFeaturedWidget';
+import { AudioHubSection } from '../components/AudioHubSection';
 import { useSEO } from '../hooks/useSEO';
 import {
   BookOpen,
@@ -33,17 +36,55 @@ export const HomeView: React.FC<HomeViewProps> = ({
 }) => {
   useSEO('home');
   const [siteContent, setSiteContent] = useState(siteContentService.getContent());
+  const [allPublicBooks, setAllPublicBooks] = useState<Book[]>([]);
+  const [breathwovenBooks, setBreathwovenBooks] = useState<Book[]>([]);
+  const [abyssalBooks, setAbyssalBooks] = useState<Book[]>([]);
 
   useEffect(() => {
-    return siteContentService.subscribe(setSiteContent);
+    const unsubContent = siteContentService.subscribe(setSiteContent);
+    const loadLiveBooks = async () => {
+      try {
+        const [publicMb, bwMb, abMb] = await Promise.all([
+          bookService.getPublicBooks(),
+          bookService.getBooksForSeries('breathwoven-cycle'),
+          bookService.getBooksForSeries('abyssal-current'),
+        ]);
+        setAllPublicBooks(publicMb.map((mb) => managedBookToBook(mb)));
+        setBreathwovenBooks(bwMb.map((mb) => managedBookToBook(mb)));
+        setAbyssalBooks(abMb.map((mb) => managedBookToBook(mb)));
+      } catch (err) {
+        console.warn('Error loading live books for HomeView:', err);
+      }
+    };
+    loadLiveBooks();
+    const unsubBooks = bookService.subscribe(loadLiveBooks);
+    return () => {
+      unsubContent();
+      unsubBooks();
+    };
   }, []);
 
   const featuredBook =
-    BOOKS.find((b) => b.id === siteContent.featuredBookId) || BOOKS[0];
-  const abyssalBook = BOOKS.find((b) => b.id === 'abyssal-current');
+    allPublicBooks.find((b) => b.id === siteContent.featuredBookId) ||
+    allPublicBooks[0] ||
+    null;
+  const abyssalBook = abyssalBooks[0] || null;
 
   return (
-    <div className="space-y-20 sm:space-y-28 pb-16">
+    <div className="space-y-12 sm:space-y-20 pb-16">
+      {/* DYNAMIC MONTHLY FEATURED ITEM ROTATION WIDGET */}
+      <MonthlyFeaturedWidget
+        onOpenExcerpt={onOpenExcerpt}
+        onOpenBookDetail={onOpenBookDetail}
+        onOpenStory={(story) => {
+          if (typeof window !== 'undefined') {
+            window.history.pushState({}, '', `/stories/${story.slug}`);
+          }
+          setActiveTab('stories');
+        }}
+        setActiveTab={setActiveTab}
+      />
+
       {/* HERO SECTION */}
       <section className="relative pt-12 sm:pt-20 pb-16 sm:pb-24 overflow-hidden border-b border-[#1f2230]">
         {/* Subtle radial golden glow background */}
@@ -80,13 +121,15 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
               {/* Action Buttons */}
               <div className="pt-2 flex flex-wrap items-center justify-center lg:justify-start gap-4">
-                <button
-                  onClick={() => onOpenExcerpt(featuredBook)}
-                  className="px-6 py-3 bg-[#c5a059] hover:bg-[#d6b169] text-[#0c0d12] text-xs font-cinzel font-bold tracking-wider uppercase rounded-lg transition-all shadow-xl shadow-[#c5a059]/15 flex items-center gap-2 cursor-pointer"
-                >
-                  <BookOpen className="w-4 h-4" />
-                  <span>{siteContent.primaryCtaLabel || 'Read Chapter 1 Excerpt'}</span>
-                </button>
+                {featuredBook && (
+                  <button
+                    onClick={() => onOpenExcerpt(featuredBook)}
+                    className="px-6 py-3 bg-[#c5a059] hover:bg-[#d6b169] text-[#0c0d12] text-xs font-cinzel font-bold tracking-wider uppercase rounded-lg transition-all shadow-xl shadow-[#c5a059]/15 flex items-center gap-2 cursor-pointer"
+                  >
+                    <BookOpen className="w-4 h-4" />
+                    <span>{siteContent.primaryCtaLabel || 'Read Chapter 1 Excerpt'}</span>
+                  </button>
+                )}
 
                 <button
                   onClick={() => {
@@ -113,25 +156,27 @@ export const HomeView: React.FC<HomeViewProps> = ({
             </div>
 
             {/* Right Column: Featured Book Display */}
-            <div className="lg:col-span-5 flex flex-col items-center">
-              <div className="relative group cursor-pointer" onClick={() => onOpenBookDetail(featuredBook)}>
-                {/* Book glow backdrop */}
-                <div className="absolute inset-0 bg-[#c5a059]/20 blur-2xl rounded-lg group-hover:bg-[#c5a059]/30 transition-all" />
-                <BookCoverArt book={featuredBook} size="xl" />
-              </div>
+            {featuredBook && (
+              <div className="lg:col-span-5 flex flex-col items-center">
+                <div className="relative group cursor-pointer" onClick={() => onOpenBookDetail(featuredBook)}>
+                  {/* Book glow backdrop */}
+                  <div className="absolute inset-0 bg-[#c5a059]/20 blur-2xl rounded-lg group-hover:bg-[#c5a059]/30 transition-all" />
+                  <BookCoverArt book={featuredBook} size="xl" />
+                </div>
 
-              <div className="text-center mt-6 space-y-1">
-                <p className="text-xs uppercase tracking-widest text-[#c5a059] font-cinzel font-semibold">
-                  Featured Novel · Book I
-                </p>
-                <h3 className="text-lg font-cinzel font-bold text-[#f5efeb]">
-                  The King's Severance
-                </h3>
-                <p className="text-xs text-[#9d978a] italic font-cormorant text-base">
-                  "When the thread of royalty snaps, an empire unravels into song and blade."
-                </p>
+                <div className="text-center mt-6 space-y-1">
+                  <p className="text-xs uppercase tracking-widest text-[#c5a059] font-cinzel font-semibold">
+                    {featuredBook.series ? `${featuredBook.series} · Book ${featuredBook.seriesOrder}` : 'Featured Volume'}
+                  </p>
+                  <h3 className="text-lg font-cinzel font-bold text-[#f5efeb]">
+                    {featuredBook.title}
+                  </h3>
+                  <p className="text-xs text-[#9d978a] italic font-cormorant text-base">
+                    "{featuredBook.tagline || featuredBook.subtitle || featuredBook.description}"
+                  </p>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       </section>
@@ -196,7 +241,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {BOOKS.filter((b) => b.series === 'The Breathwoven Cycle').map((book) => (
+          {breathwovenBooks.map((book) => (
             <BookCard
               key={book.id}
               book={book}
@@ -307,6 +352,9 @@ export const HomeView: React.FC<HomeViewProps> = ({
           </div>
         </div>
       </section>
+
+      {/* DEDICATED AUDIO & SOUNDTRACK VAULT SECTION */}
+      <AudioHubSection />
 
       {/* DISPATCHES & ARTICLES */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { Book } from '../types';
 import { BookCoverArt } from './BookCoverArt';
 import { NewsletterSignup } from './NewsletterSignup';
-import { coverImageService } from '../services/coverImageService';
+import { bookService } from '../services/bookService';
+import { optimizeCoverImage } from '../utils/imageOptimizer';
 import { useSEO } from '../hooks/useSEO';
 import {
   X,
@@ -16,6 +17,8 @@ import {
   RotateCcw,
   CheckCircle2,
   Palette,
+  Clock,
+  Calendar,
 } from 'lucide-react';
 
 interface BookDetailModalProps {
@@ -32,16 +35,22 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({
   onOpenPrivacy,
 }) => {
   useSEO(book ? book.id : '');
-  const [hasCustomCover, setHasCustomCover] = useState(
-    book ? !!coverImageService.getCover(book.id) : false
-  );
+  const getLiveCover = () => {
+    if (!book) return false;
+    const live = bookService.getCachedBookById(book.id);
+    return Boolean(live?.coverImage || book.coverImage);
+  };
+  const [hasCustomCover, setHasCustomCover] = useState(getLiveCover);
   const [coverToast, setCoverToast] = useState<string | null>(null);
 
   useEffect(() => {
-    if (book) {
-      setHasCustomCover(!!coverImageService.getCover(book.id));
-    }
-  }, [book]);
+    setHasCustomCover(getLiveCover());
+    if (!book?.id) return;
+    const unsub = bookService.subscribe(() => {
+      setHasCustomCover(getLiveCover());
+    });
+    return () => unsub();
+  }, [book?.id]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -53,23 +62,43 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({
 
   if (!book) return null;
 
-  const handleFileUpload = (file: File) => {
+  const handleFileUpload = async (file: File) => {
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const dataUrl = e.target?.result as string;
-      if (dataUrl) {
-        coverImageService.setCover(book.id, dataUrl);
+    try {
+      const { downloadUrl, storagePath } = await bookService.uploadBookCover(book.id, file);
+      await bookService.updateBookCover(book.id, downloadUrl, storagePath);
+      setHasCustomCover(true);
+      setCoverToast('Cover synchronized everywhere!');
+      setTimeout(() => setCoverToast(null), 2500);
+    } catch {
+      try {
+        const optimized = await optimizeCoverImage(file, {
+          maxWidth: 1200,
+          maxHeight: 1800,
+          quality: 0.85,
+        });
+        await bookService.updateBookCover(book.id, optimized.dataUrl);
         setHasCustomCover(true);
-        setCoverToast('Cover updated!');
+        setCoverToast('Cover synchronized everywhere!');
         setTimeout(() => setCoverToast(null), 2500);
+      } catch {
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+          const dataUrl = e.target?.result as string;
+          if (dataUrl) {
+            await bookService.updateBookCover(book.id, dataUrl);
+            setHasCustomCover(true);
+            setCoverToast('Cover synchronized everywhere!');
+            setTimeout(() => setCoverToast(null), 2500);
+          }
+        };
+        reader.readAsDataURL(file);
       }
-    };
-    reader.readAsDataURL(file);
+    }
   };
 
-  const handleResetCover = () => {
-    coverImageService.removeCover(book.id);
+  const handleResetCover = async () => {
+    await bookService.updateBookCover(book.id, '');
     setHasCustomCover(false);
     setCoverToast('Reset to default art');
     setTimeout(() => setCoverToast(null), 2500);
@@ -92,10 +121,30 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({
       <div className="relative w-full max-w-4xl bg-[#0f111a] border border-[#2a2d40] rounded-2xl shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col">
         {/* Header bar */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#232635] bg-[#0c0d14]">
-          <div className="flex items-center gap-2 text-xs text-[#a39e93]">
+          <div className="flex items-center gap-3 text-xs text-[#a39e93]">
             <span className="text-[#c5a059] font-semibold">{book.series}</span>
             <span aria-hidden="true">·</span>
             <span>Book {book.seriesOrder}</span>
+
+            {/* Status Badge */}
+            {book.status === 'published' && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-cinzel font-bold uppercase tracking-wider bg-emerald-950/80 text-emerald-300 border border-emerald-500/30">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                <span>Published</span>
+              </span>
+            )}
+            {book.status === 'pending' && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-cinzel font-bold uppercase tracking-wider bg-amber-950/80 text-amber-300 border border-amber-500/30">
+                <Clock className="w-2.5 h-2.5 text-amber-400" />
+                <span>Pending</span>
+              </span>
+            )}
+            {book.status === 'unreleased' && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-cinzel font-bold uppercase tracking-wider bg-slate-800/80 text-slate-300 border border-slate-600/40">
+                <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+                <span>Unreleased</span>
+              </span>
+            )}
           </div>
 
           <button
@@ -216,32 +265,73 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({
             </div>
           </div>
 
-          {/* Bookstore Purchase Links */}
+          {/* Bookstore Purchase Links or Release Date TBA */}
           <div className="bg-[#141724] border border-[#26293d] rounded-xl p-5 sm:p-6">
             <h4 className="text-xs uppercase font-cinzel tracking-widest text-[#d5cfc2] font-semibold mb-4">
-              Where to Order {book.title}
+              {book.status === 'published' ? `Where to Order ${book.title}` : `Availability & Publication Status`}
             </h4>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-              {book.buyLinks.map((link) => (
-                <a
-                  key={link.name}
-                  href={link.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center justify-between p-3 rounded-lg bg-[#0e1018] border border-[#2b2e40] hover:border-[#c5a059] transition-all group"
-                >
-                  <div className="text-xs">
-                    <span className="text-[#f5efeb] font-medium group-hover:text-[#c5a059] block">
-                      {link.name}
-                    </span>
-                    {link.badge && (
-                      <span className="text-[10px] text-[#c5a059]">{link.badge}</span>
-                    )}
+
+            {book.status === 'published' ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                {book.buyLinks && book.buyLinks.length > 0 ? (
+                  book.buyLinks.map((link) => (
+                    <a
+                      key={link.name}
+                      href={link.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center justify-between p-3 rounded-lg bg-[#0e1018] border border-[#2b2e40] hover:border-[#c5a059] transition-all group"
+                    >
+                      <div className="text-xs">
+                        <span className="text-[#f5efeb] font-medium group-hover:text-[#c5a059] block">
+                          {link.name}
+                        </span>
+                        {link.badge && (
+                          <span className="text-[10px] text-[#c5a059]">{link.badge}</span>
+                        )}
+                      </div>
+                      <ExternalLink className="w-3.5 h-3.5 text-[#736e63] group-hover:text-[#c5a059]" />
+                    </a>
+                  ))
+                ) : (
+                  <div className="text-xs text-[#8e887a] col-span-full">
+                    Official purchase retailers will be listed here.
                   </div>
-                  <ExternalLink className="w-3.5 h-3.5 text-[#736e63] group-hover:text-[#c5a059]" />
-                </a>
-              ))}
-            </div>
+                )}
+              </div>
+            ) : book.status === 'pending' ? (
+              <div className="p-4 rounded-xl bg-amber-950/30 border border-amber-500/30 flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                    <Clock className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h5 className="font-cinzel font-semibold text-[#f5efeb] text-sm">
+                      Release Date TBA · Pending Publication
+                    </h5>
+                    <p className="text-xs text-[#a8a395] mt-0.5">
+                      This title is forthcoming in the publication pipeline. Subscribe to the author newsletter below for release notifications.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-700/50 flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-slate-800/60 border border-slate-700/60 flex items-center justify-center text-slate-400 shrink-0">
+                    <Calendar className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h5 className="font-cinzel font-semibold text-[#f5efeb] text-sm">
+                      Unreleased Work in Progress
+                    </h5>
+                    <p className="text-xs text-[#a8a395] mt-0.5">
+                      Manuscript is actively being drafted and revised. Join the journey to receive dispatches and sneak peeks.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Physical Craftmanship & Wood Engraving Note */}

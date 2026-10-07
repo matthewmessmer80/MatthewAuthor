@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { newsletterService } from '../services/newsletterService';
-import { coverImageService } from '../services/coverImageService';
-import { BOOKS } from '../data/authorData';
+import { optimizeCoverImage } from '../utils/imageOptimizer';
+import { bookService, managedBookToBook } from '../services/bookService';
 import { BookCoverArt } from './BookCoverArt';
 import { AdminSeoDashboard } from './AdminSeoDashboard';
-import { NewsletterSettings, NewsletterSubscriber } from '../types';
+import { NewsletterSettings, NewsletterSubscriber, Book } from '../types';
 import {
   Shield,
   X,
@@ -42,26 +42,42 @@ export const AdminNewsletterDashboard: React.FC<AdminNewsletterDashboardProps> =
   const [savedToast, setSavedToast] = useState(false);
   const [filterSource, setFilterSource] = useState('all');
   const [coverToast, setCoverToast] = useState<string | null>(null);
+  const [liveBooks, setLiveBooks] = useState<Book[]>([]);
+
+  useEffect(() => {
+    bookService.getAllBooks().then((mb) => setLiveBooks(mb.map((b) => managedBookToBook(b))));
+  }, []);
 
   const stats = newsletterService.getStats();
 
-  const handleFileUpload = (bookId: string, file: File) => {
+  const handleFileUpload = async (bookId: string, file: File) => {
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const dataUrl = e.target?.result as string;
-      if (dataUrl) {
-        coverImageService.setCover(bookId, dataUrl);
-        setCoverToast(`Successfully updated cover for "${BOOKS.find((b) => b.id === bookId)?.title}"`);
-        setTimeout(() => setCoverToast(null), 3500);
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      const optimized = await optimizeCoverImage(file, {
+        maxWidth: 1200,
+        maxHeight: 1800,
+        quality: 0.85,
+      });
+      await bookService.updateBookCover(bookId, optimized.dataUrl);
+      setCoverToast(`Successfully updated cover for "${liveBooks.find((b) => b.id === bookId)?.title || 'Book'}"`);
+      setTimeout(() => setCoverToast(null), 3500);
+    } catch {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const dataUrl = e.target?.result as string;
+        if (dataUrl) {
+          await bookService.updateBookCover(bookId, dataUrl);
+          setCoverToast(`Successfully updated cover for "${liveBooks.find((b) => b.id === bookId)?.title || 'Book'}"`);
+          setTimeout(() => setCoverToast(null), 3500);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
-  const handleResetCover = (bookId: string) => {
-    coverImageService.removeCover(bookId);
-    setCoverToast(`Reset cover for "${BOOKS.find((b) => b.id === bookId)?.title}" to default art`);
+  const handleResetCover = async (bookId: string) => {
+    await bookService.updateBookCover(bookId, '');
+    setCoverToast(`Reset cover for "${liveBooks.find((b) => b.id === bookId)?.title || 'Book'}" to default art`);
     setTimeout(() => setCoverToast(null), 3500);
   };
 
@@ -491,8 +507,8 @@ export const AdminNewsletterDashboard: React.FC<AdminNewsletterDashboardProps> =
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {BOOKS.map((book) => {
-                  const hasCustom = !!coverImageService.getCover(book.id);
+                {liveBooks.map((book) => {
+                  const hasCustom = !!book.coverImage;
                   return (
                     <div
                       key={book.id}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { ManagedBook, bookService } from '../../services/bookService';
+import { ManagedBook, ManagedSeries, bookService } from '../../services/bookService';
 import { BookCoverArt } from '../../components/BookCoverArt';
 import {
   Save,
@@ -59,17 +59,35 @@ export const AdminBookEditorView: React.FC<AdminBookEditorViewProps> = ({
   const [errorToast, setErrorToast] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'basic' | 'cover' | 'metadata' | 'excerpt' | 'seo'>('basic');
 
+  const [availableSeries, setAvailableSeries] = useState<ManagedSeries[]>([]);
+
   useEffect(() => {
-    async function loadBook() {
-      if (initialBookId) {
-        const found = await bookService.getBookById(initialBookId);
+    async function loadData() {
+      setIsLoading(true);
+      try {
+        const [found, allSeries] = await Promise.all([
+          initialBookId ? bookService.getBookById(initialBookId) : Promise.resolve(null),
+          bookService.getAllSeries(),
+        ]);
+        if (allSeries) {
+          setAvailableSeries(allSeries);
+        }
         if (found) {
           setBook(found);
+        } else if (allSeries && allSeries.length > 0 && !initialBookId) {
+          setBook((prev) => ({
+            ...prev,
+            seriesId: prev.seriesId || allSeries[0].id,
+            seriesName: prev.seriesName || allSeries[0].name,
+          }));
         }
+      } catch (err) {
+        console.warn('Error loading book editor data:', err);
+      } finally {
+        setIsLoading(false);
       }
-      setIsLoading(false);
     }
-    loadBook();
+    loadData();
   }, [initialBookId]);
 
   // Prompt before unload if unsaved changes
@@ -122,8 +140,16 @@ export const AdminBookEditorView: React.FC<AdminBookEditorViewProps> = ({
       return;
     }
 
+    // 1. Immediately create and display local object URL preview so the user instantly sees their uploaded cover
+    const localPreviewUrl = URL.createObjectURL(file);
+    setBook((prev) => ({
+      ...prev,
+      coverImage: localPreviewUrl,
+    }));
+    setIsDirty(true);
+
     try {
-      setUploadProgress(10);
+      setUploadProgress(20);
       const bookId = book.id || `book-${Date.now()}`;
       const { downloadUrl, storagePath } = await bookService.uploadBookCover(
         bookId,
@@ -138,8 +164,9 @@ export const AdminBookEditorView: React.FC<AdminBookEditorViewProps> = ({
         coverStoragePath: storagePath,
       }));
       setIsDirty(true);
-      setUploadProgress(null);
-      setSaveToast('Cover image successfully uploaded and staged.');
+      setUploadProgress(100);
+      setTimeout(() => setUploadProgress(null), 400);
+      setSaveToast('Cover image processed and synchronized.');
       setTimeout(() => setSaveToast(null), 3000);
     } catch (err: any) {
       setUploadProgress(null);
@@ -158,7 +185,7 @@ export const AdminBookEditorView: React.FC<AdminBookEditorViewProps> = ({
     const payload: Partial<ManagedBook> = { ...book };
     if (forcePublish !== undefined) {
       payload.publicationState = forcePublish ? 'PUBLIC' : 'DRAFT';
-      payload.status = forcePublish ? 'published' : 'in-progress';
+      payload.status = forcePublish ? 'published' : 'unreleased';
       payload.indexing = forcePublish ? 'index' : 'noindex';
     }
 
@@ -342,18 +369,22 @@ export const AdminBookEditorView: React.FC<AdminBookEditorViewProps> = ({
                 Series
               </label>
               <select
-                value={book.seriesId || 'breathwoven-cycle'}
+                value={book.seriesId || ''}
                 onChange={(e) => {
                   const sId = e.target.value;
-                  const sName = sId === 'breathwoven-cycle' ? 'The Breathwoven Cycle' : 'The Abyssal Current';
+                  const targetSeries = availableSeries.find((s) => s.id === sId || s.slug === sId);
+                  const sName = targetSeries ? targetSeries.name : (sId === 'standalone' ? 'Standalone' : '');
                   updateField('seriesId', sId);
                   updateField('seriesName', sName);
                 }}
                 className="w-full px-3.5 py-2.5 bg-[#0a0b10] border border-[#2b2e40] rounded-lg text-sm text-[#f5efeb] focus:outline-none focus:border-[#c5a059]"
               >
-                <option value="breathwoven-cycle">The Breathwoven Cycle</option>
-                <option value="abyssal-current">The Abyssal Current</option>
-                <option value="standalone">Standalone Fantasy</option>
+                <option value="">Standalone / Unassigned</option>
+                {availableSeries.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -375,9 +406,36 @@ export const AdminBookEditorView: React.FC<AdminBookEditorViewProps> = ({
               />
             </div>
 
+            {/* Book Publication Status */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-cinzel font-semibold text-[#d4cfc2] flex items-center justify-between">
+                <span>Book Status *</span>
+                <span className="text-[10px] text-[#c5a059] uppercase tracking-wider font-mono">
+                  {book.status || 'published'}
+                </span>
+              </label>
+              <select
+                value={book.status || 'published'}
+                onChange={(e) => {
+                  const val = e.target.value as 'published' | 'pending' | 'unreleased';
+                  updateField('status', val);
+                  if (val === 'published' && (book.publicationState === 'DRAFT' || book.publicationState === 'PRIVATE')) {
+                    updateField('publicationState', 'PUBLIC');
+                  } else if (val === 'pending' && book.publicationState !== 'TEASER') {
+                    updateField('publicationState', 'TEASER');
+                  }
+                }}
+                className="w-full px-3.5 py-2.5 bg-[#0a0b10] border border-[#2b2e40] rounded-lg text-sm text-[#f5efeb] focus:outline-none focus:border-[#c5a059]"
+              >
+                <option value="published">Published — Available to buy and read live</option>
+                <option value="pending">Pending — Release date TBA / Forthcoming</option>
+                <option value="unreleased">Unreleased — In progress / Not yet released</option>
+              </select>
+            </div>
+
             <div className="space-y-1.5">
               <label className="block text-xs font-cinzel font-semibold text-[#d4cfc2]">
-                Publication State
+                Catalog Visibility (Publication State)
               </label>
               <select
                 value={book.publicationState || 'PUBLIC'}
@@ -528,11 +586,29 @@ export const AdminBookEditorView: React.FC<AdminBookEditorViewProps> = ({
                 />
               </div>
 
+              {/* Direct Cover URL (Optional manual override) */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-cinzel font-semibold text-[#d4cfc2]">
+                  Cover Image URL
+                </label>
+                <input
+                  type="url"
+                  value={book.coverImage || ''}
+                  onChange={(e) => updateField('coverImage', e.target.value)}
+                  placeholder="Uploaded automatically, or paste image URL directly"
+                  className="w-full px-3.5 py-2.5 bg-[#0a0b10] border border-[#2b2e40] rounded-lg text-sm text-[#f5efeb] font-mono focus:outline-none focus:border-[#c5a059]"
+                />
+              </div>
+
               {book.coverImage && (
                 <div className="pt-2 flex items-center gap-3">
                   <button
                     type="button"
-                    onClick={() => updateField('coverImage', undefined)}
+                    onClick={() => {
+                      updateField('coverImage', '');
+                      updateField('coverStoragePath', '');
+                      if (book.id) bookService.updateBookCover(book.id, '');
+                    }}
                     className="text-xs text-rose-400 hover:text-rose-300 flex items-center gap-1 cursor-pointer"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -547,9 +623,12 @@ export const AdminBookEditorView: React.FC<AdminBookEditorViewProps> = ({
               <span className="text-xs font-cinzel text-[#8e887a] mb-2 uppercase tracking-wider">
                 Live Public Rendering Preview
               </span>
-              <div className="w-56 aspect-[3/4] rounded-lg overflow-hidden border border-[#2b2e40] shadow-2xl relative bg-[#0c0d12]">
-                <BookCoverArt book={book as any} size="lg" />
+              <div className="w-56 sm:w-64 aspect-[2/3] rounded-lg overflow-hidden border border-[#2b2e40] shadow-2xl relative bg-[#0c0d12]">
+                <BookCoverArt book={book as any} className="w-full h-full" showHoverEffect={false} />
               </div>
+              <p className="text-[11px] text-[#7d786d] mt-2 text-center max-w-xs font-cormorant italic">
+                Standard 2:3 book ratio · automatically centered and cropped to fill without distortion
+              </p>
             </div>
           </div>
         </div>

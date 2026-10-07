@@ -1,4 +1,4 @@
-export type PublicationState = 'public' | 'teaser' | 'draft' | 'private';
+export type PublicationState = 'public' | 'teaser' | 'draft' | 'private' | 'PUBLIC' | 'TEASER' | 'DRAFT' | 'PRIVATE';
 
 export interface BreadcrumbItem {
   name: string;

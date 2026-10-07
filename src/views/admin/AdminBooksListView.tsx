@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { ManagedBook, bookService } from '../../services/bookService';
 import { BookCoverArt } from '../../components/BookCoverArt';
@@ -16,37 +16,91 @@ import {
   Layers,
   Filter,
   Trash2,
+  BookOpen,
+  Loader2,
+  RefreshCw,
 } from 'lucide-react';
 
 interface AdminBooksListViewProps {
+  initialBooks?: ManagedBook[];
   onAddNew: () => void;
   onEditBook: (bookId: string) => void;
   onPreviewPublic: (book: ManagedBook) => void;
 }
 
 export const AdminBooksListView: React.FC<AdminBooksListViewProps> = ({
+  initialBooks,
   onAddNew,
   onEditBook,
   onPreviewPublic,
 }) => {
   const { isAuthor, role } = useAuth();
-  const [books, setBooks] = useState<ManagedBook[]>([]);
+  const [books, setBooks] = useState<ManagedBook[]>(() => {
+    if (initialBooks && initialBooks.length > 0) return initialBooks;
+    return bookService.getCachedBooks();
+  });
+  const [loading, setLoading] = useState<boolean>(() => {
+    if (initialBooks && initialBooks.length > 0) return false;
+    return bookService.isBooksLoading();
+  });
+  const [error, setError] = useState<string | null>(() => {
+    const err = bookService.getBooksError();
+    return err ? 'Unable to load books. Please try again.' : null;
+  });
   const [seriesFilter, setSeriesFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [confirmArchiveBook, setConfirmArchiveBook] = useState<ManagedBook | null>(null);
   const [confirmDeleteBook, setConfirmDeleteBook] = useState<ManagedBook | null>(null);
   const [actionToast, setActionToast] = useState<string | null>(null);
 
-  const loadBooks = async () => {
-    const list = await bookService.getBooks();
-    setBooks(list);
-  };
+  const syncBooksFromService = useCallback(() => {
+    const cached = bookService.getCachedBooks();
+    setBooks(cached);
+    setLoading(bookService.isBooksLoading() && cached.length === 0);
+    const err = bookService.getBooksError();
+    if (err) {
+      setError('Unable to load books. Please try again.');
+      if (process.env.NODE_ENV !== 'production') {
+        console.error('[AdminBooksListView] Firestore error:', err);
+      }
+    } else {
+      setError(null);
+    }
+  }, []);
+
+  const loadBooks = useCallback(async () => {
+    try {
+      if (books.length === 0) {
+        setLoading(true);
+      }
+      setError(null);
+      const list = await bookService.getAllBooks();
+      setBooks(list);
+      setLoading(false);
+    } catch (err: any) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.error('[AdminBooksListView] Unable to load books from Firestore:', err);
+      }
+      setError('Unable to load books. Please try again.');
+      setLoading(false);
+    }
+  }, [books.length]);
 
   useEffect(() => {
+    if (initialBooks && initialBooks.length > 0) {
+      setBooks(initialBooks);
+      setLoading(false);
+    }
+  }, [initialBooks]);
+
+  useEffect(() => {
+    syncBooksFromService();
     loadBooks();
-    const unsub = bookService.subscribe(loadBooks);
-    return () => unsub();
-  }, []);
+    const unsub = bookService.subscribe(syncBooksFromService);
+    return () => {
+      unsub();
+    };
+  }, [syncBooksFromService, loadBooks]);
 
   const handleTogglePublish = async (book: ManagedBook) => {
     const isCurrentlyPublic = book.publicationState === 'PUBLIC';
@@ -54,7 +108,7 @@ export const AdminBooksListView: React.FC<AdminBooksListViewProps> = ({
     await bookService.saveBook({
       ...book,
       publicationState: nextState,
-      status: nextState === 'PUBLIC' ? 'published' : 'in-progress',
+      status: nextState === 'PUBLIC' ? 'published' : 'unreleased',
       indexing: nextState === 'PUBLIC' ? 'index' : 'noindex',
     });
     setActionToast(`Book "${book.title}" changed to ${nextState}.`);
@@ -111,11 +165,29 @@ export const AdminBooksListView: React.FC<AdminBooksListViewProps> = ({
   const filteredBooks = books.filter((b) => {
     if (seriesFilter !== 'all' && b.seriesId !== seriesFilter) return false;
     if (statusFilter !== 'all') {
-      if (statusFilter === 'archived' && b.status !== 'archived') return false;
-      if (statusFilter !== 'archived' && b.publicationState !== statusFilter) return false;
+      const bookStatus = ((): 'published' | 'pending' | 'unreleased' | 'archived' => {
+        if ((b.status as string) === 'archived') return 'archived';
+        if (b.status === 'pending' || (b.status as string) === 'upcoming') return 'pending';
+        if (b.status === 'unreleased' || (b.status as string) === 'in-progress') return 'unreleased';
+        return 'published';
+      })();
+
+      if (statusFilter === 'archived') return bookStatus === 'archived';
+      if (statusFilter === 'published') return bookStatus === 'published';
+      if (statusFilter === 'pending') return bookStatus === 'pending';
+      if (statusFilter === 'unreleased') return bookStatus === 'unreleased';
+      if (b.publicationState !== statusFilter) return false;
     }
     return true;
   });
+
+  const availableSeries = Array.from(
+    new Map(
+      books
+        .filter((b) => b.seriesId && b.seriesName)
+        .map((b) => [b.seriesId, b.seriesName])
+    ).entries()
+  );
 
   return (
     <div className="space-y-6">
@@ -160,8 +232,17 @@ export const AdminBooksListView: React.FC<AdminBooksListViewProps> = ({
           className="px-3 py-1.5 bg-[#0b0c12] border border-[#2b2e40] rounded text-[#d5cfc2] focus:outline-none"
         >
           <option value="all">All Series</option>
-          <option value="breathwoven-cycle">The Breathwoven Cycle</option>
-          <option value="abyssal-current">The Abyssal Current</option>
+          {availableSeries.map(([id, name]) => (
+            <option key={id} value={id}>
+              {name}
+            </option>
+          ))}
+          {!availableSeries.some(([id]) => id === 'breathwoven-cycle') && (
+            <option value="breathwoven-cycle">The Breathwoven Cycle</option>
+          )}
+          {!availableSeries.some(([id]) => id === 'abyssal-current') && (
+            <option value="abyssal-current">The Abyssal Current</option>
+          )}
         </select>
 
         <select
@@ -169,10 +250,13 @@ export const AdminBooksListView: React.FC<AdminBooksListViewProps> = ({
           onChange={(e) => setStatusFilter(e.target.value)}
           className="px-3 py-1.5 bg-[#0b0c12] border border-[#2b2e40] rounded text-[#d5cfc2] focus:outline-none"
         >
-          <option value="all">All States</option>
-          <option value="PUBLIC">PUBLIC</option>
-          <option value="TEASER">TEASER</option>
-          <option value="DRAFT">DRAFT</option>
+          <option value="all">All Statuses & States</option>
+          <option value="published">Status: Published</option>
+          <option value="pending">Status: Pending (TBA)</option>
+          <option value="unreleased">Status: Unreleased</option>
+          <option value="PUBLIC">State: PUBLIC</option>
+          <option value="TEASER">State: TEASER</option>
+          <option value="DRAFT">State: DRAFT</option>
           <option value="archived">Archived</option>
         </select>
 
@@ -207,8 +291,8 @@ export const AdminBooksListView: React.FC<AdminBooksListViewProps> = ({
                   >
                     {/* Thumbnail */}
                     <td className="py-3 px-4 w-16">
-                      <div className="w-12 h-16 rounded overflow-hidden border border-[#2b2e40] bg-[#0c0d12] flex items-center justify-center">
-                        <BookCoverArt book={book as any} size="sm" />
+                      <div className="w-12 aspect-[2/3] rounded overflow-hidden border border-[#2b2e40] bg-[#0c0d12] flex items-center justify-center shrink-0 shadow-md">
+                        <BookCoverArt book={book as any} className="w-full h-full" showHoverEffect={false} />
                       </div>
                     </td>
 
@@ -238,21 +322,53 @@ export const AdminBooksListView: React.FC<AdminBooksListViewProps> = ({
                       <div className="text-[11px] text-[#8e887a]">Book {book.seriesOrder}</div>
                     </td>
 
-                    {/* Publication State */}
+                    {/* Publication State & Status */}
                     <td className="py-3 px-4">
-                      <span
-                        className={`inline-block px-2.5 py-1 rounded text-[10px] font-cinzel font-bold tracking-wider uppercase ${
-                          book.publicationState === 'PUBLIC'
-                            ? 'bg-emerald-950/70 text-emerald-300 border border-emerald-700/50'
-                            : book.publicationState === 'TEASER'
-                            ? 'bg-teal-950/70 text-teal-300 border border-teal-700/50'
-                            : book.publicationState === 'DRAFT'
-                            ? 'bg-amber-950/70 text-amber-300 border border-amber-700/50'
-                            : 'bg-zinc-800 text-zinc-300 border border-zinc-700'
-                        }`}
-                      >
-                        {book.publicationState}
-                      </span>
+                      <div className="flex flex-col gap-1.5 items-start">
+                        {/* Status Badge */}
+                        {(() => {
+                          const s = ((): 'published' | 'pending' | 'unreleased' => {
+                            if (book.status === 'pending' || (book.status as string) === 'upcoming') return 'pending';
+                            if (book.status === 'unreleased' || (book.status as string) === 'in-progress') return 'unreleased';
+                            return 'published';
+                          })();
+
+                          if (s === 'published') {
+                            return (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-cinzel font-bold tracking-wider uppercase bg-emerald-950/80 text-emerald-300 border border-emerald-500/40">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                                <span>Published</span>
+                              </span>
+                            );
+                          }
+                          if (s === 'pending') {
+                            return (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-cinzel font-bold tracking-wider uppercase bg-amber-950/80 text-amber-300 border border-amber-500/40">
+                                <span>Pending</span>
+                              </span>
+                            );
+                          }
+                          return (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-cinzel font-bold tracking-wider uppercase bg-slate-800/80 text-slate-300 border border-slate-600/40">
+                              <span>Unreleased</span>
+                            </span>
+                          );
+                        })()}
+
+                        <span
+                          className={`inline-block px-2 py-0.5 rounded text-[9px] font-mono tracking-wider uppercase ${
+                            book.publicationState === 'PUBLIC'
+                              ? 'bg-[#14231b] text-emerald-400/90 border border-emerald-800/30'
+                              : book.publicationState === 'TEASER'
+                              ? 'bg-[#122325] text-teal-400/90 border border-teal-800/30'
+                              : book.publicationState === 'DRAFT'
+                              ? 'bg-[#251d12] text-amber-400/90 border border-amber-800/30'
+                              : 'bg-zinc-900 text-zinc-400 border border-zinc-700/40'
+                          }`}
+                        >
+                          {book.publicationState}
+                        </span>
+                      </div>
                     </td>
 
                     {/* Featured */}
@@ -343,6 +459,56 @@ export const AdminBooksListView: React.FC<AdminBooksListViewProps> = ({
                   </tr>
                 );
               })}
+              {loading && books.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="py-16 text-center text-[#8e887a] space-y-3">
+                    <Loader2 className="w-8 h-8 text-[#c5a059] animate-spin mx-auto" />
+                    <p className="font-cinzel text-sm text-[#f5efeb]">Loading books...</p>
+                    <p className="text-xs text-[#7d776a]">Synchronizing catalog with Firestore.</p>
+                  </td>
+                </tr>
+              )}
+              {!loading && error && books.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="py-14 text-center text-rose-300 space-y-3">
+                    <AlertTriangle className="w-8 h-8 text-rose-400 mx-auto" />
+                    <p className="font-cinzel text-sm font-semibold">{error}</p>
+                    <button
+                      onClick={loadBooks}
+                      className="px-4 py-2 bg-[#1e2130] hover:bg-[#282c40] text-[#c5a059] rounded-lg text-xs font-cinzel transition-colors inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>Retry</span>
+                    </button>
+                  </td>
+                </tr>
+              )}
+              {!loading && !error && filteredBooks.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="py-12 text-center text-[#8e887a] space-y-3">
+                    <BookOpen className="w-8 h-8 text-[#5c5649] mx-auto" />
+                    <p className="font-cinzel text-sm text-[#f5efeb]">
+                      {books.length === 0 ? 'No books have been added yet.' : 'No books match the active filter criteria.'}
+                    </p>
+                    <p className="text-xs text-[#7d776a] max-w-sm mx-auto">
+                      {books.length === 0
+                        ? 'Click "+ Add New Book" above to create your first book document in Firestore.'
+                        : 'Try clearing the active filter or selecting a different series.'}
+                    </p>
+                    {books.length > 0 && (seriesFilter !== 'all' || statusFilter !== 'all') && (
+                      <button
+                        onClick={() => {
+                          setSeriesFilter('all');
+                          setStatusFilter('all');
+                        }}
+                        className="px-3 py-1.5 bg-[#1e2130] hover:bg-[#282c40] text-[#c5a059] rounded text-xs font-cinzel transition-colors cursor-pointer"
+                      >
+                        Reset Filters
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

@@ -52,12 +52,25 @@
     },
     "comment": {
       "title": "Comment",
-      "description": "Reader comments and moderation state",
+      "description": "Reader comments, non-star reviews, and moderation state with 7-day holding workflow",
       "type": "object",
       "properties": {
         "bookId": {
           "type": "string",
           "description": "Book ID"
+        },
+        "storyId": {
+          "type": "string",
+          "description": "Short story ID"
+        },
+        "discussionId": {
+          "type": "string",
+          "description": "Discussion thread ID"
+        },
+        "targetType": {
+          "type": "string",
+          "enum": ["book", "story", "discussion"],
+          "description": "Target content type"
         },
         "userId": {
           "type": "string",
@@ -71,13 +84,48 @@
           "type": "string",
           "description": "Comment text"
         },
+        "thematicTier": {
+          "type": "string",
+          "enum": [
+            "Unputdownable / Masterpiece",
+            "Deeply Captivating / Essential",
+            "Rich & Atmospheric / Recommended",
+            "Intriguing / Worth Reading",
+            "Not for Me"
+          ],
+          "description": "Thematic non-star rating tier"
+        },
+        "thematicScore": {
+          "type": "number",
+          "description": "Numerical rating indicator on a 1-5 Tome scale"
+        },
+        "isReview": {
+          "type": "boolean",
+          "description": "Whether this comment is a formal review"
+        },
         "status": {
           "type": "string",
-          "enum": ["PENDING", "APPROVED", "HIDDEN", "REMOVED", "FLAGGED"],
-          "description": "Moderation status"
+          "enum": ["PENDING", "APPROVED", "HIDDEN", "REMOVED", "FLAGGED", "REMOVED_PENDING_DELETION"],
+          "description": "Moderation status including 7-day holding state"
+        },
+        "removedAt": {
+          "type": "string",
+          "description": "ISO timestamp when comment entered holding"
+        },
+        "scheduledDeletionAt": {
+          "type": "string",
+          "description": "ISO timestamp exactly 7 days after removal"
+        },
+        "removalReason": {
+          "type": "string",
+          "description": "Removal reason (Spam, Harassment, Hate, Off-Topic, etc.)"
+        },
+        "removedBy": {
+          "type": "string",
+          "description": "Name or identifier of moderator who initiated removal"
         }
       },
-      "required": ["bookId", "userId", "content", "status"]
+      "required": ["userId", "content", "status"]
     },
     "commentReport": {
       "title": "CommentReport",
@@ -269,13 +317,19 @@
     },
     "series": {
       "title": "Series",
-      "description": "Book series management with ordering",
+      "description": "Author-only book series management with ordering and universe lore",
       "type": "object",
       "properties": {
         "name": {
           "type": "string",
           "maxLength": 150,
           "description": "Series title"
+        },
+        "slug": {
+          "type": "string",
+          "maxLength": 150,
+          "pattern": "^[a-z0-9-]+$",
+          "description": "URL slug for canonical routing"
         },
         "description": {
           "type": "string",
@@ -287,18 +341,46 @@
           "maxLength": 500,
           "description": "Series tagline or teaser"
         },
+        "genres": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Genres or categorization tags"
+        },
+        "artworkUrl": {
+          "type": "string",
+          "description": "Public URL or data URI of series artwork banner"
+        },
         "publicationState": {
           "type": "string",
-          "enum": ["PUBLIC", "TEASER", "DRAFT", "PRIVATE"],
-          "description": "Series visibility"
+          "enum": ["DRAFT", "PRIVATE", "TEASER", "PUBLIC"],
+          "description": "Series visibility and access control"
         },
         "status": {
           "type": "string",
-          "enum": ["published", "in-progress", "archived"],
-          "description": "Series completion status"
+          "enum": ["ACTIVE", "IN DEVELOPMENT", "COMPLETED", "ON HIATUS", "ARCHIVED", "published", "in-progress", "archived"],
+          "description": "Series production and completion status"
+        },
+        "bookIds": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Ordered book IDs belonging to this series"
+        },
+        "seoTitle": {
+          "type": "string",
+          "maxLength": 150,
+          "description": "SEO page title"
+        },
+        "metaDescription": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "SEO meta description"
+        },
+        "socialImage": {
+          "type": "string",
+          "description": "OpenGraph share image URL"
         }
       },
-      "required": ["name", "publicationState"]
+      "required": ["name", "slug", "publicationState", "status"]
     },
     "story": {
       "title": "Story",
@@ -440,9 +522,201 @@
         }
       },
       "required": ["action", "targetType", "userEmail", "userId"]
+    },
+    "discussion": {
+      "title": "Discussion",
+      "description": "Community discussions board threads",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Thread title"
+        },
+        "category": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Thread category"
+        },
+        "content": {
+          "type": "string",
+          "maxLength": 10000,
+          "description": "Original post body"
+        },
+        "authorId": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Author UID"
+        },
+        "authorName": {
+          "type": "string",
+          "maxLength": 150,
+          "description": "Author display name"
+        },
+        "rulesAgreed": {
+          "type": "boolean",
+          "description": "Explicit community rules agreement"
+        }
+      },
+      "required": ["title", "content", "authorId", "authorName", "rulesAgreed"]
+    },
+    "galleryItem": {
+      "title": "GalleryItem",
+      "description": "Handcrafted artwork, wood engravings, and visual canon assets",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 200, "description": "Item title" },
+        "description": { "type": "string", "maxLength": 2000, "description": "Artwork description" },
+        "imageUrl": { "type": "string", "maxLength": 2000, "description": "Firebase Storage or image URL" },
+        "altText": { "type": "string", "maxLength": 300, "description": "Accessible alt text" },
+        "category": { "type": "string", "maxLength": 100, "description": "Gallery category" },
+        "publicationState": { "type": "string", "enum": ["DRAFT", "PRIVATE", "TEASER", "PUBLIC"] }
+      },
+      "required": ["title", "imageUrl", "category", "publicationState"]
+    },
+    "character": {
+      "title": "Character",
+      "description": "Canon character profiles and dramatis personae",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 200, "description": "Character name" },
+        "role": { "type": "string", "maxLength": 200, "description": "Title or role" },
+        "shortDescription": { "type": "string", "maxLength": 1000, "description": "Summary" },
+        "seriesId": { "type": "string", "maxLength": 100, "description": "Associated series ID" },
+        "publicationState": { "type": "string", "enum": ["DRAFT", "PRIVATE", "TEASER", "PUBLIC"] }
+      },
+      "required": ["name", "shortDescription", "publicationState"]
+    },
+    "loreEntry": {
+      "title": "LoreEntry",
+      "description": "Worldbuilding lore and canon entries",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 200, "description": "Lore title" },
+        "category": { "type": "string", "maxLength": 100, "description": "Lore category" },
+        "description": { "type": "string", "maxLength": 1000, "description": "Summary description" },
+        "content": { "type": "string", "maxLength": 10000, "description": "Full lore text" },
+        "publicationState": { "type": "string", "enum": ["DRAFT", "PRIVATE", "TEASER", "PUBLIC"] }
+      },
+      "required": ["title", "category", "publicationState"]
+    },
+    "siteSettings": {
+      "title": "SiteSettings",
+      "description": "Global author site settings and contact information",
+      "type": "object",
+      "properties": {
+        "authorName": { "type": "string", "description": "Author display name" },
+        "siteTitle": { "type": "string", "description": "Global meta title" },
+        "tagline": { "type": "string", "description": "Author philosophy tagline" },
+        "contactEmail": { "type": "string", "description": "Primary contact email" },
+        "contactPhone": { "type": "string", "description": "Studio or workshop phone" },
+        "contactAddress": { "type": "string", "description": "Workshop or mailing address" },
+        "websiteUrl": { "type": "string", "description": "Official author website URL" },
+        "amazonAuthorUrl": { "type": "string", "description": "Amazon Author Central profile link" },
+        "updatedAt": { "type": "string", "description": "Timestamp of last update" },
+        "updatedBy": { "type": "string", "description": "Email or ID of user who made update" }
+      },
+      "required": ["authorName", "contactEmail", "siteTitle"]
+    },
+    "song": {
+      "title": "Song",
+      "description": "Companion audio tracks, original music, and dedication recordings",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "description": "Song title" },
+        "artist": { "type": "string", "description": "Artist or performer name" },
+        "category": { "type": "string", "description": "Musical category or genre" },
+        "description": { "type": "string", "description": "Song background and story" },
+        "lyrics": { "type": "string", "description": "Song lyrics" },
+        "dedication": { "type": "string", "description": "Dedication note or tribute" },
+        "audioUrl": { "type": "string", "description": "Direct audio URL or storage link" },
+        "coverImage": { "type": "string", "description": "Artwork cover URL" },
+        "releaseDate": { "type": "string", "description": "Release date" },
+        "status": {
+          "type": "string",
+          "enum": ["Draft", "Published", "Unreleased"],
+          "description": "Publication state"
+        },
+        "isPublic": { "type": "boolean", "description": "Whether song is listed publicly" },
+        "featured": { "type": "boolean", "description": "Whether featured in top spotlight" },
+        "displayOrder": { "type": "number", "description": "Display order ranking" },
+        "youtubeUrl": { "type": "string", "description": "YouTube link" },
+        "spotifyUrl": { "type": "string", "description": "Spotify link" },
+        "soundcloudUrl": { "type": "string", "description": "SoundCloud link" },
+        "bandcampUrl": { "type": "string", "description": "Bandcamp link" },
+        "createdAt": { "type": "string", "description": "Creation timestamp" },
+        "updatedAt": { "type": "string", "description": "Last updated timestamp" }
+      },
+      "required": ["title", "artist", "status"]
+    },
+    "emailEvent": {
+      "title": "EmailEvent",
+      "description": "Authoritative welcome email dispatch record for duplicate prevention",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "description": "Deterministic event identifier" },
+        "recipientEmail": { "type": "string", "description": "Recipient email address" },
+        "recipientName": { "type": "string", "description": "Recipient first or display name" },
+        "emailType": { "type": "string", "enum": ["NEWSLETTER_WELCOME", "ACCOUNT_AND_NEWSLETTER_WELCOME"] },
+        "deliveryStatus": { "type": "string", "enum": ["PENDING", "SENT", "FAILED"] },
+        "subscriberId": { "type": "string", "description": "Associated subscriber record ID" },
+        "userId": { "type": "string", "description": "Associated user account UID" },
+        "subject": { "type": "string", "description": "Email subject line" },
+        "createdAt": { "type": "string", "description": "Event timestamp" },
+        "sentAt": { "type": "string", "description": "Successful dispatch timestamp" }
+      },
+      "required": ["recipientEmail", "emailType", "deliveryStatus"]
+    },
+    "mailItem": {
+      "title": "MailItem",
+      "description": "Trigger Email extension mail document queue",
+      "type": "object",
+      "properties": {
+        "to": { "type": "string", "description": "Recipient email" },
+        "message": { "type": "object", "description": "Message subject, html, text payload" }
+      },
+      "required": ["to", "message"]
+    },
+    "emailTemplate": {
+      "title": "EmailTemplate",
+      "description": "Author-managed welcome email templates with personalization variables",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "enum": ["NEWSLETTER_WELCOME", "ACCOUNT_AND_NEWSLETTER_WELCOME"] },
+        "type": { "type": "string", "enum": ["NEWSLETTER_WELCOME", "ACCOUNT_AND_NEWSLETTER_WELCOME"] },
+        "title": { "type": "string", "description": "Template title" },
+        "description": { "type": "string", "description": "Template description" },
+        "subject": { "type": "string", "description": "Email subject with template variables" },
+        "body": { "type": "string", "description": "Email body content with template variables" },
+        "updatedAt": { "type": "string", "description": "Timestamp of last edit" },
+        "updatedBy": { "type": "string", "description": "UID of author who last edited" },
+        "updatedByName": { "type": "string", "description": "Display name of author who last edited" },
+        "isCustomized": { "type": "boolean", "description": "Whether customized from default" }
+      },
+      "required": ["id", "type", "subject", "body"]
     }
   },
   "firestore": {
+    "/emailTemplates/{templateId}": {
+      "schema": "#/entities/emailTemplate",
+      "description": "Author-managed welcome email templates"
+    },
+    "/emailEvents/{eventId}": {
+      "schema": "#/entities/emailEvent",
+      "description": "Transactional email event registry"
+    },
+    "/mail/{mailId}": {
+      "schema": "#/entities/mailItem",
+      "description": "Firebase Trigger Email dispatch queue"
+    },
+    "/songs/{songId}": {
+      "schema": "#/entities/song",
+      "description": "Companion songs and soundtrack recordings"
+    },
+    "/siteSettings/{settingId}": {
+      "schema": "#/entities/siteSettings",
+      "description": "Global site settings including contact information"
+    },
     "/admins/{adminId}": {
       "schema": "#/entities/admin",
       "description": "Admin authorization registry"
@@ -454,6 +728,10 @@
     "/comments/{commentId}": {
       "schema": "#/entities/comment",
       "description": "Book discussion comments"
+    },
+    "/discussions/{discussionId}": {
+      "schema": "#/entities/discussion",
+      "description": "Community discussion board threads"
     },
     "/commentReports/{reportId}": {
       "schema": "#/entities/commentReport",
@@ -478,6 +756,18 @@
     "/news/{newsId}": {
       "schema": "#/entities/news",
       "description": "Author news articles and updates"
+    },
+    "/gallery/{galleryId}": {
+      "schema": "#/entities/galleryItem",
+      "description": "Author craft and gallery items"
+    },
+    "/characters/{characterId}": {
+      "schema": "#/entities/character",
+      "description": "Canon characters directory"
+    },
+    "/lore/{loreId}": {
+      "schema": "#/entities/loreEntry",
+      "description": "Worldbuilding lore repository"
     },
     "/subscribers/{subscriberId}": {
       "schema": "#/entities/subscriber",

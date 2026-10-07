@@ -37,13 +37,17 @@ import {
 // Import local provisioned configuration
 import configJson from '../../firebase-applet-config.json';
 
+const rawConfig = configJson as Record<string, any>;
+
+const env = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env : {} as Record<string, any>;
+
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || configJson.apiKey,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || configJson.authDomain,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || configJson.projectId,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || configJson.storageBucket,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || configJson.messagingSenderId,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || configJson.appId,
+  apiKey: env.VITE_FIREBASE_API_KEY || configJson.apiKey,
+  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || configJson.authDomain,
+  projectId: env.VITE_FIREBASE_PROJECT_ID || configJson.projectId,
+  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || configJson.storageBucket,
+  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || configJson.messagingSenderId,
+  appId: env.VITE_FIREBASE_APP_ID || configJson.appId,
 };
 
 export const app: FirebaseApp = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
@@ -51,13 +55,19 @@ export const app: FirebaseApp = getApps().length === 0 ? initializeApp(firebaseC
 export const auth: Auth = getAuth(app);
 
 // Use custom database ID if provisioned, else default
-export const db: Firestore = configJson.firestoreDatabaseId && configJson.firestoreDatabaseId !== '(default)'
-  ? getFirestore(app, configJson.firestoreDatabaseId)
+export const db: Firestore = rawConfig.firestoreDatabaseId && rawConfig.firestoreDatabaseId !== '(default)'
+  ? getFirestore(app, rawConfig.firestoreDatabaseId)
   : getFirestore(app);
 
 export const storage: FirebaseStorage = getStorage(app);
 
-export const ADMIN_EMAIL = import.meta.env.VITE_ADMIN_EMAIL || 'mmessmer80@gmail.com';
+export const ADMIN_EMAIL = env.VITE_ADMIN_EMAIL || 'memauthor1980@gmail.com';
+export const AUTHOR_ADMIN_EMAILS = [
+  'memauthor1980@gmail.com',
+  'memauthor1980@gamil.com',
+  'mmessmer80@gmail.com',
+  ADMIN_EMAIL.toLowerCase(),
+];
 
 // Test connection on boot per Firebase guidelines
 async function testConnection() {
@@ -198,7 +208,7 @@ export function getFirebaseDiagnosticInfo(): FirebaseDiagnosticReport {
     authInitialized: Boolean(auth),
     emailPasswordProviderAvailable: true,
     firestoreInitialized: Boolean(db),
-    firestoreDatabaseId: configJson.firestoreDatabaseId || '(default)',
+    firestoreDatabaseId: rawConfig.firestoreDatabaseId || '(default)',
     currentUser: auth.currentUser?.email || null,
     currentUserUid: auth.currentUser?.uid || null,
     currentUserVerified: Boolean(auth.currentUser?.emailVerified),
@@ -211,8 +221,10 @@ export function getFirebaseDiagnosticInfo(): FirebaseDiagnosticReport {
 export async function checkIsAdmin(user: User | null): Promise<boolean> {
   if (!user || !user.email) return false;
 
-  // 1. Direct match with configured administrator email
-  if (user.email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+  const emailLower = user.email.toLowerCase();
+
+  // 1. Direct match with configured administrator emails
+  if (AUTHOR_ADMIN_EMAILS.includes(emailLower)) {
     return true;
   }
 
@@ -230,7 +242,7 @@ export async function checkIsAdmin(user: User | null): Promise<boolean> {
   try {
     const adminDocRef = doc(db, 'admins', user.uid);
     const snap = await getDoc(adminDocRef);
-    if (snap.exists() && (snap.data()?.role === 'admin' || snap.data()?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase())) {
+    if (snap.exists() && (snap.data()?.role === 'admin' || AUTHOR_ADMIN_EMAILS.includes((snap.data()?.email || '').toLowerCase()))) {
       return true;
     }
   } catch (err) {
@@ -245,13 +257,14 @@ export async function checkIsAdmin(user: User | null): Promise<boolean> {
  */
 export async function ensureAdminRecord(user: User): Promise<void> {
   if (!user || !user.email) return;
-  if (user.email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+  const emailLower = user.email.toLowerCase();
+  if (AUTHOR_ADMIN_EMAILS.includes(emailLower)) {
     try {
       const adminDocRef = doc(db, 'admins', user.uid);
       await setDoc(
         adminDocRef,
         {
-          email: user.email.toLowerCase(),
+          email: emailLower,
           role: 'admin',
           updatedAt: serverTimestamp(),
         },

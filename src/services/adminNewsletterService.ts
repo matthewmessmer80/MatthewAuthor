@@ -81,6 +81,9 @@ const DEFAULT_PROVIDER_CONFIG: NewsletterProviderConfig = {
   defaultUnsubscribeText: 'Unsubscribe from this list',
 };
 
+const STORAGE_KEY_DELETED_NEWSLETTERS = 'mem_admin_newsletters_deleted_v1';
+const STORAGE_KEY_SEEDED_NEWSLETTERS = 'mem_admin_newsletters_seeded_v1';
+
 const SAMPLE_EXAMPLE_DRAFT: ManagedNewsletter = {
   id: 'draft-sample-woven',
   title: 'Something New Is Being Woven (Sample Draft)',
@@ -129,14 +132,38 @@ class AdminNewsletterService {
     this.loadStorage();
   }
 
+  private getDeletedIds(): Set<string> {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY_DELETED_NEWSLETTERS);
+      if (stored) {
+        return new Set(JSON.parse(stored));
+      }
+    } catch {}
+    return new Set();
+  }
+
+  private addDeletedId(id: string): void {
+    try {
+      const set = this.getDeletedIds();
+      set.add(id);
+      localStorage.setItem(STORAGE_KEY_DELETED_NEWSLETTERS, JSON.stringify(Array.from(set)));
+    } catch {}
+  }
+
   private loadStorage() {
     if (typeof window === 'undefined') return;
+    const deleted = this.getDeletedIds();
     try {
       const stored = localStorage.getItem('mem_admin_newsletters_v1');
+      const isSeeded = localStorage.getItem(STORAGE_KEY_SEEDED_NEWSLETTERS);
       if (stored) {
-        this.localNewsletters = JSON.parse(stored);
+        const parsed: ManagedNewsletter[] = JSON.parse(stored);
+        this.localNewsletters = parsed.filter((n) => !deleted.has(n.id));
+      } else if (!isSeeded) {
+        this.localNewsletters = [SAMPLE_EXAMPLE_DRAFT].filter((n) => !deleted.has(n.id));
+        localStorage.setItem(STORAGE_KEY_SEEDED_NEWSLETTERS, 'true');
       } else {
-        this.localNewsletters = [SAMPLE_EXAMPLE_DRAFT];
+        this.localNewsletters = [];
       }
 
       const storedConfig = localStorage.getItem('mem_newsletter_provider_config_v1');
@@ -144,7 +171,7 @@ class AdminNewsletterService {
         this.providerConfig = { ...DEFAULT_PROVIDER_CONFIG, ...JSON.parse(storedConfig) };
       }
     } catch (e) {
-      this.localNewsletters = [SAMPLE_EXAMPLE_DRAFT];
+      this.localNewsletters = [];
     }
   }
 
@@ -169,11 +196,16 @@ class AdminNewsletterService {
   }
 
   public async getNewsletters(): Promise<ManagedNewsletter[]> {
+    const deleted = this.getDeletedIds();
     try {
       const snap = await getDocs(collection(db, 'newsletters'));
       if (!snap.empty) {
         const list: ManagedNewsletter[] = [];
-        snap.forEach((d) => list.push({ ...(d.data() as ManagedNewsletter), id: d.id }));
+        snap.forEach((d) => {
+          if (!deleted.has(d.id)) {
+            list.push({ ...(d.data() as ManagedNewsletter), id: d.id });
+          }
+        });
         list.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
         this.localNewsletters = list;
         this.saveStorage();
@@ -182,7 +214,7 @@ class AdminNewsletterService {
     } catch (e) {
       // use local
     }
-    return this.localNewsletters;
+    return this.localNewsletters.filter((n) => !deleted.has(n.id));
   }
 
   public async getNewsletterById(id: string): Promise<ManagedNewsletter | null> {
@@ -239,6 +271,7 @@ class AdminNewsletterService {
   }
 
   public async deleteNewsletter(id: string): Promise<void> {
+    this.addDeletedId(id);
     try {
       await deleteDoc(doc(db, 'newsletters', id));
     } catch (e) {

@@ -11,13 +11,9 @@ import {
   AlertCircle,
   CheckCircle,
   ArrowLeft,
-  UserCheck,
-  HelpCircle,
-  Sparkles,
-  UserPlus,
-  BookOpen,
+  User,
   Info,
-  ExternalLink,
+  MapPin,
 } from 'lucide-react';
 
 interface AdminLoginViewProps {
@@ -26,19 +22,19 @@ interface AdminLoginViewProps {
   initialMode?: AuthMode;
 }
 
-export type AuthMode = 'sign-in' | 'register-reader' | 'first-time-setup' | 'forgot-password';
+export type AuthMode = 'sign-in' | 'register-reader' | 'forgot-password';
 
 export const AdminLoginView: React.FC<AdminLoginViewProps> = ({
   onSuccess,
   onBackToSite,
   initialMode = 'sign-in',
 }) => {
-  useSEO('home', { title: 'Portal Sign In | Matthew E. Messmer', robots: 'noindex, nofollow' });
+  useSEO('home', { title: 'Sign In | Matthew E. Messmer', robots: 'noindex, nofollow' });
 
-  const { signIn, registerReader, createAdminAccount, sendPasswordReset, adminEmailConfigured } = useAuth();
+  const { signIn, registerReader, sendPasswordReset } = useAuth();
 
-  const [mode, setMode] = useState<AuthMode>(initialMode);
-  const [email, setEmail] = useState<string>('');
+  const [mode, setMode] = useState<AuthMode>(initialMode === 'register-reader' ? 'register-reader' : 'sign-in');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [firstName, setFirstName] = useState('');
@@ -46,6 +42,10 @@ export const AdminLoginView: React.FC<AdminLoginViewProps> = ({
   const [username, setUsername] = useState('');
   const [acceptTerms, setAcceptTerms] = useState(false);
   const [newsletterOptIn, setNewsletterOptIn] = useState(false);
+  // Optional reader location states
+  const [city, setCity] = useState('');
+  const [stateRegion, setStateRegion] = useState('');
+  const [country, setCountry] = useState('');
 
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -55,9 +55,17 @@ export const AdminLoginView: React.FC<AdminLoginViewProps> = ({
     setMode(newMode);
     setErrorMessage(null);
     setResetSuccessMessage(null);
-    if (newMode === 'first-time-setup' && !email) {
-      setEmail(adminEmailConfigured);
-    }
+    setEmail('');
+    setPassword('');
+    setConfirmPassword('');
+    setFirstName('');
+    setLastName('');
+    setUsername('');
+    setAcceptTerms(false);
+    setNewsletterOptIn(true);
+    setCity('');
+    setStateRegion('');
+    setCountry('');
   };
 
   const isOperationNotAllowed =
@@ -78,10 +86,10 @@ export const AdminLoginView: React.FC<AdminLoginViewProps> = ({
         setLoading(false);
         return;
       }
-      const res = await sendPasswordReset(email);
+      const res = await sendPasswordReset(email.trim());
       setLoading(false);
       if (res.success) {
-        setResetSuccessMessage(`Password reset link dispatched to ${email}. Check your inbox.`);
+        setResetSuccessMessage(`Password reset link dispatched to ${email.trim()}. Check your inbox.`);
       } else {
         setErrorMessage(res.error || 'Failed to send password reset. Please try again.');
       }
@@ -115,7 +123,7 @@ export const AdminLoginView: React.FC<AdminLoginViewProps> = ({
         return;
       }
       if (password.length < 6) {
-        setErrorMessage('Please choose a stronger password.');
+        setErrorMessage('Please choose a password with at least 6 characters.');
         setLoading(false);
         return;
       }
@@ -135,6 +143,9 @@ export const AdminLoginView: React.FC<AdminLoginViewProps> = ({
         lastName: lastName.trim(),
         username: username.trim(),
         newsletterOptIn,
+        city: city.trim() || undefined,
+        state: stateRegion.trim() || undefined,
+        country: country.trim() || undefined,
       });
 
       setLoading(false);
@@ -142,34 +153,6 @@ export const AdminLoginView: React.FC<AdminLoginViewProps> = ({
         onSuccess(res.role || 'reader');
       } else {
         setErrorMessage(res.error || 'Registration failed.');
-      }
-      return;
-    }
-
-    if (mode === 'first-time-setup') {
-      if (!email.trim() || !password) {
-        setErrorMessage('Please enter both your email address and a password.');
-        setLoading(false);
-        return;
-      }
-      if (password.length < 6) {
-        setErrorMessage('Please choose a stronger password.');
-        setLoading(false);
-        return;
-      }
-      if (password !== confirmPassword) {
-        setErrorMessage('Passwords do not match.');
-        setLoading(false);
-        return;
-      }
-
-      const res = await createAdminAccount(email.trim(), password);
-      setLoading(false);
-
-      if (res.success) {
-        onSuccess('author');
-      } else {
-        setErrorMessage(res.error || 'Failed to initialize author account.');
       }
       return;
     }
@@ -213,20 +196,16 @@ export const AdminLoginView: React.FC<AdminLoginViewProps> = ({
             <h1 className="text-2xl font-cinzel font-bold text-[#f5efeb] tracking-wide">
               {mode === 'register-reader'
                 ? 'Create Reader Account'
-                : mode === 'first-time-setup'
-                ? 'Author Initial Setup'
                 : mode === 'forgot-password'
                 ? 'Password Recovery'
                 : 'Account Sign In'}
             </h1>
             <p className="text-xs text-[#8e887a] font-cormorant italic text-base">
               {mode === 'register-reader'
-                ? 'Register to post thoughts on books, participate in discussions, and save your profile.'
-                : mode === 'first-time-setup'
-                ? 'First-time author password creation for Matthew E. Messmer.'
+                ? 'Register to post thoughts on books, participate in discussions, and save your reading profile.'
                 : mode === 'forgot-password'
                 ? 'Enter your account email to receive password reset instructions.'
-                : 'Sign in to access your Reader, Editor, or Author account.'}
+                : 'Sign in with your credentials to access your account.'}
             </p>
           </div>
 
@@ -275,22 +254,15 @@ export const AdminLoginView: React.FC<AdminLoginViewProps> = ({
                 <div className="leading-relaxed font-medium">{errorMessage}</div>
               </div>
 
-              {/* Dedicated guidance for auth/operation-not-allowed */}
               {isOperationNotAllowed && (
                 <div className="p-3 bg-[#180e11] border border-rose-500/30 rounded-lg text-[11px] text-rose-200 space-y-2">
                   <div className="flex items-center gap-1.5 font-cinzel font-semibold text-amber-300">
                     <Info className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Firebase Console Administrator Notice</span>
+                    <span>Authentication Notice</span>
                   </div>
                   <p className="leading-relaxed text-[#dcd7cb]">
-                    Email/Password authentication provider must be turned on in your Firebase Project Console:
+                    Email/Password sign-in provider must be enabled in your Firebase Project Console.
                   </p>
-                  <div className="font-mono text-[11px] bg-[#0c0d12] p-2 rounded text-[#c5a059] border border-[#2b2e40] break-all">
-                    Authentication → Sign-in providers → Email/Password → Enabled
-                  </div>
-                  <div className="text-[11px] text-[#a8a396] pt-1">
-                    Once enabled in the Firebase Console, users can register and sign in immediately with Email and Password.
-                  </div>
                 </div>
               )}
             </div>
@@ -299,7 +271,7 @@ export const AdminLoginView: React.FC<AdminLoginViewProps> = ({
           {resetSuccessMessage && (
             <div className="p-3.5 bg-[#142319] border border-emerald-500/40 text-emerald-300 text-xs rounded-xl flex items-start gap-2.5 animate-in fade-in">
               <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-              <div className="leading-relaxed">{resetSuccessMessage}</div>
+              <span>{resetSuccessMessage}</span>
             </div>
           )}
 
@@ -310,47 +282,50 @@ export const AdminLoginView: React.FC<AdminLoginViewProps> = ({
               <>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs font-cinzel text-[#dcd7cb] block mb-1">
-                      First Name <span className="text-rose-400">*</span>
+                    <label className="text-xs font-cinzel text-[#dcd7cb] block mb-1.5">
+                      First Name *
                     </label>
                     <input
                       type="text"
                       required
                       value={firstName}
                       onChange={(e) => setFirstName(e.target.value)}
-                      placeholder="e.g. Samuel"
-                      className="w-full bg-[#161825] border border-[#2b2e40] focus:border-[#c5a059] focus:outline-none rounded-lg px-3.5 py-2.5 text-xs text-[#f5efeb]"
+                      placeholder="Jane"
+                      className="w-full bg-[#161825] border border-[#2e3146] focus:border-[#c5a059] focus:outline-none rounded-xl px-3.5 py-2.5 text-xs text-[#f5efeb]"
                     />
                   </div>
                   <div>
-                    <label className="text-xs font-cinzel text-[#dcd7cb] block mb-1">
-                      Last Name <span className="text-rose-400">*</span>
+                    <label className="text-xs font-cinzel text-[#dcd7cb] block mb-1.5">
+                      Last Name *
                     </label>
                     <input
                       type="text"
                       required
                       value={lastName}
                       onChange={(e) => setLastName(e.target.value)}
-                      placeholder="e.g. Kaye"
-                      className="w-full bg-[#161825] border border-[#2b2e40] focus:border-[#c5a059] focus:outline-none rounded-lg px-3.5 py-2.5 text-xs text-[#f5efeb]"
+                      placeholder="Doe"
+                      className="w-full bg-[#161825] border border-[#2e3146] focus:border-[#c5a059] focus:outline-none rounded-xl px-3.5 py-2.5 text-xs text-[#f5efeb]"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="text-xs font-cinzel text-[#dcd7cb] block mb-1">
-                    Username <span className="text-rose-400">*</span>
+                  <label className="text-xs font-cinzel text-[#dcd7cb] block mb-1.5">
+                    Community Username *
                   </label>
-                  <input
-                    type="text"
-                    required
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    placeholder="e.g. SamuelKaye"
-                    className="w-full bg-[#161825] border border-[#2b2e40] focus:border-[#c5a059] focus:outline-none rounded-lg px-3.5 py-2.5 text-xs text-[#f5efeb]"
-                  />
+                  <div className="relative">
+                    <User className="w-4 h-4 text-[#7d786d] absolute left-3.5 top-3" />
+                    <input
+                      type="text"
+                      required
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      placeholder="WeaverReader99"
+                      className="w-full bg-[#161825] border border-[#2e3146] focus:border-[#c5a059] focus:outline-none rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-[#f5efeb]"
+                    />
+                  </div>
                   <p className="text-[10px] text-[#7d786d] mt-1">
-                    Used as your public display name on book discussions and comments.
+                    This public handle appears on your book comments and discussion threads.
                   </p>
                 </div>
               </>
@@ -358,18 +333,19 @@ export const AdminLoginView: React.FC<AdminLoginViewProps> = ({
 
             {/* Email Field */}
             <div>
-              <label className="text-xs font-cinzel text-[#dcd7cb] block mb-1">
-                Email Address <span className="text-rose-400">*</span>
+              <label className="text-xs font-cinzel text-[#dcd7cb] block mb-1.5">
+                Email Address *
               </label>
               <div className="relative">
-                <Mail className="w-4 h-4 text-[#6e685c] absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <Mail className="w-4 h-4 text-[#7d786d] absolute left-3.5 top-3" />
                 <input
                   type="email"
                   required
+                  autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="your.email@example.com"
-                  className="w-full bg-[#161825] border border-[#2b2e40] focus:border-[#c5a059] focus:outline-none rounded-lg pl-10 pr-3.5 py-2.5 text-xs text-[#f5efeb]"
+                  placeholder="name@example.com"
+                  className="w-full bg-[#161825] border border-[#2e3146] focus:border-[#c5a059] focus:outline-none rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-[#f5efeb]"
                 />
               </div>
             </div>
@@ -377,55 +353,128 @@ export const AdminLoginView: React.FC<AdminLoginViewProps> = ({
             {/* Password Field */}
             {mode !== 'forgot-password' && (
               <div>
-                <label className="text-xs font-cinzel text-[#dcd7cb] block mb-1">
-                  Password <span className="text-rose-400">*</span>
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-cinzel text-[#dcd7cb]">
+                    Password *
+                  </label>
+                  {mode === 'sign-in' && (
+                    <button
+                      type="button"
+                      onClick={() => switchMode('forgot-password')}
+                      className="text-[11px] text-[#c5a059] hover:underline cursor-pointer"
+                    >
+                      Forgot Password?
+                    </button>
+                  )}
+                </div>
                 <div className="relative">
-                  <Lock className="w-4 h-4 text-[#6e685c] absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <Lock className="w-4 h-4 text-[#7d786d] absolute left-3.5 top-3" />
                   <input
                     type="password"
                     required
+                    autoComplete={mode === 'sign-in' ? 'current-password' : 'new-password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
-                    className="w-full bg-[#161825] border border-[#2b2e40] focus:border-[#c5a059] focus:outline-none rounded-lg pl-10 pr-3.5 py-2.5 text-xs text-[#f5efeb]"
+                    className="w-full bg-[#161825] border border-[#2e3146] focus:border-[#c5a059] focus:outline-none rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-[#f5efeb]"
                   />
                 </div>
               </div>
             )}
 
             {/* Confirm Password */}
-            {(mode === 'register-reader' || mode === 'first-time-setup') && (
+            {mode === 'register-reader' && (
               <div>
-                <label className="text-xs font-cinzel text-[#dcd7cb] block mb-1">
-                  Confirm Password <span className="text-rose-400">*</span>
+                <label className="text-xs font-cinzel text-[#dcd7cb] block mb-1.5">
+                  Confirm Password *
                 </label>
                 <div className="relative">
-                  <Lock className="w-4 h-4 text-[#6e685c] absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <Key className="w-4 h-4 text-[#7d786d] absolute left-3.5 top-3" />
                   <input
                     type="password"
                     required
+                    autoComplete="new-password"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder="••••••••"
-                    className="w-full bg-[#161825] border border-[#2b2e40] focus:border-[#c5a059] focus:outline-none rounded-lg pl-10 pr-3.5 py-2.5 text-xs text-[#f5efeb]"
+                    className="w-full bg-[#161825] border border-[#2e3146] focus:border-[#c5a059] focus:outline-none rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-[#f5efeb]"
                   />
                 </div>
               </div>
             )}
 
-            {/* Terms and Newsletter checkboxes for reader registration */}
+            {/* Optional Reader Location Information */}
+            {mode === 'register-reader' && (
+              <div className="pt-3 pb-2 space-y-3 border-t border-[#212435]">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-1.5 text-xs font-cinzel font-bold text-[#c5a059]">
+                    <MapPin className="w-3.5 h-3.5 text-[#c5a059]" />
+                    <span>Optional — Just for Matthew&apos;s Curiosity</span>
+                  </div>
+                  <blockquote className="text-[11px] text-[#a8a396] leading-relaxed italic border-l-2 border-[#c5a059]/40 pl-2.5 py-0.5">
+                    &ldquo;I&apos;d love to know where readers are discovering my books from! Sharing your city, state/province, and country is completely optional and is simply to satisfy my curiosity about where readers are joining me from. You can leave these fields blank if you&apos;d rather not share.&rdquo;
+                  </blockquote>
+                  <p className="text-[10px] text-[#736e63]">
+                    Completely voluntary. Leaving this blank has zero effect on your account or access to the site. Visible solely to the author.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <div>
+                    <label className="text-[11px] font-cinzel text-[#8f897c] block mb-1">
+                      City <span className="text-[10px] lowercase text-[#6e695e]">(optional)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={city}
+                      onChange={(e) => setCity(e.target.value)}
+                      placeholder="e.g. Austin"
+                      className="w-full bg-[#161825] border border-[#2e3146] focus:border-[#c5a059] focus:outline-none rounded-xl px-3 py-2 text-xs text-[#f5efeb]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-cinzel text-[#8f897c] block mb-1">
+                      State / Province / Region <span className="text-[10px] lowercase text-[#6e695e]">(optional)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={stateRegion}
+                      onChange={(e) => setStateRegion(e.target.value)}
+                      placeholder="e.g. Texas"
+                      className="w-full bg-[#161825] border border-[#2e3146] focus:border-[#c5a059] focus:outline-none rounded-xl px-3 py-2 text-xs text-[#f5efeb]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-cinzel text-[#8f897c] block mb-1">
+                      Country <span className="text-[10px] lowercase text-[#6e695e]">(optional)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={country}
+                      onChange={(e) => setCountry(e.target.value)}
+                      placeholder="e.g. United States"
+                      className="w-full bg-[#161825] border border-[#2e3146] focus:border-[#c5a059] focus:outline-none rounded-xl px-3 py-2 text-xs text-[#f5efeb]"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Reader Terms & Newsletter */}
             {mode === 'register-reader' && (
               <div className="space-y-3 pt-2">
                 <label className="flex items-start gap-2.5 text-xs text-[#a8a396] cursor-pointer">
                   <input
                     type="checkbox"
+                    required
                     checked={acceptTerms}
                     onChange={(e) => setAcceptTerms(e.target.checked)}
                     className="mt-0.5 rounded border-[#2e3146] text-[#c5a059] focus:ring-[#c5a059] bg-[#161825]"
                   />
                   <span>
-                    I accept the website terms of service and acknowledge the privacy policy.
+                    I agree to the Terms of Service, Privacy Policy, and Community Guidelines.
                   </span>
                 </label>
 
@@ -437,7 +486,7 @@ export const AdminLoginView: React.FC<AdminLoginViewProps> = ({
                     className="mt-0.5 rounded border-[#2e3146] text-[#c5a059] focus:ring-[#c5a059] bg-[#161825]"
                   />
                   <span>
-                    Subscribe to Matthew E. Messmer's reader newsletter for dispatches and release news.
+                    Join the author&apos;s newsletter for updates on new books, stories, and releases (includes welcome dispatch).
                   </span>
                 </label>
               </div>
@@ -453,9 +502,7 @@ export const AdminLoginView: React.FC<AdminLoginViewProps> = ({
                 {loading
                   ? 'Processing...'
                   : mode === 'register-reader'
-                  ? 'Register as Reader'
-                  : mode === 'first-time-setup'
-                  ? 'Set Author Password'
+                  ? 'Create Reader Account'
                   : mode === 'forgot-password'
                   ? 'Send Reset Link'
                   : 'Sign In'}
@@ -464,22 +511,42 @@ export const AdminLoginView: React.FC<AdminLoginViewProps> = ({
             </button>
           </form>
 
-          {/* Footer Assistance */}
-          <div className="pt-4 border-t border-[#1e2130] text-center text-xs text-[#7d786d] space-y-1">
+          {/* Clean Mode Toggle Links */}
+          <div className="pt-4 border-t border-[#1e2130] text-center text-xs text-[#7d786d]">
             {mode === 'sign-in' && (
               <p>
-                Author initial setup?{' '}
+                Don't have an account?{' '}
                 <button
-                  onClick={() => switchMode('first-time-setup')}
-                  className="text-[#c5a059] hover:underline font-cinzel"
+                  type="button"
+                  onClick={() => switchMode('register-reader')}
+                  className="text-[#c5a059] hover:underline font-semibold cursor-pointer ml-1"
                 >
-                  Create Author Password
+                  Create a Reader Account
                 </button>
               </p>
             )}
-            {mode === 'first-time-setup' && (
+            {mode === 'register-reader' && (
               <p>
-                Designated author email: <code className="text-[#c5a059]">{adminEmailConfigured}</code>
+                Already have an account?{' '}
+                <button
+                  type="button"
+                  onClick={() => switchMode('sign-in')}
+                  className="text-[#c5a059] hover:underline font-semibold cursor-pointer ml-1"
+                >
+                  Sign In
+                </button>
+              </p>
+            )}
+            {mode === 'forgot-password' && (
+              <p>
+                Remembered your password?{' '}
+                <button
+                  type="button"
+                  onClick={() => switchMode('sign-in')}
+                  className="text-[#c5a059] hover:underline font-semibold cursor-pointer ml-1"
+                >
+                  Back to Sign In
+                </button>
               </p>
             )}
           </div>

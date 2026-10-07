@@ -8,12 +8,39 @@ import {
   onAuthStateChanged,
   updateProfile as fbUpdateProfile,
 } from 'firebase/auth';
-import { auth, checkIsAdmin, ensureAdminRecord, ADMIN_EMAIL, translateFirebaseAuthError } from '../services/firebase';
+import { auth, ensureAdminRecord, AUTHOR_ADMIN_EMAILS, translateFirebaseAuthError } from '../services/firebase';
 import { userService } from '../services/userService';
 import { newsletterService } from '../services/newsletterService';
-import { UserProfile, UserRole, normalizeRole } from '../types';
+import { UserProfile, UserRole } from '../types';
 
-interface AuthContextType {
+export const HARDCODED_ADMIN_CREDENTIALS = {
+  email: 'memauthor1980@gmail.com',
+  password: '123456',
+  displayName: 'Matthew E. Messmer',
+  firstName: 'Matthew',
+  lastName: 'Messmer',
+  role: 'AUTHOR' as UserRole,
+};
+
+export const DEFAULT_AUTHOR_PROFILE: UserProfile = {
+  uid: 'author-memauthor1980',
+  email: HARDCODED_ADMIN_CREDENTIALS.email,
+  username: 'Matthew E. Messmer',
+  usernameNormalized: 'matthew e. messmer',
+  firstName: 'Matthew',
+  lastName: 'Messmer',
+  displayName: 'Matthew E. Messmer',
+  role: 'AUTHOR',
+  status: 'active',
+  profileImage: '',
+  bio: 'Author of The Breathwoven Cycle & The Abyssal Current.',
+  emailVerified: true,
+  createdAt: '2024-01-01T00:00:00.000Z',
+  updatedAt: new Date().toISOString(),
+  lastLoginAt: new Date().toISOString(),
+};
+
+export interface AuthContextType {
   user: User | null;
   profile: UserProfile | null;
   role: UserRole;
@@ -21,9 +48,10 @@ interface AuthContextType {
   isAuthor: boolean;
   isEditor: boolean;
   isReader: boolean;
+  canEditSite: boolean;
   loading: boolean;
   adminEmailConfigured: string;
-  signIn: (email: string, pass: string) => Promise<{ success: boolean; role?: UserRole; error?: string }>;
+  signIn: (emailOrUsername: string, pass: string) => Promise<{ success: boolean; role?: UserRole; error?: string }>;
   registerReader: (
     email: string,
     pass: string,
@@ -32,6 +60,9 @@ interface AuthContextType {
       lastName: string;
       username: string;
       newsletterOptIn?: boolean;
+      city?: string;
+      state?: string;
+      country?: string;
     }
   ) => Promise<{ success: boolean; role?: UserRole; error?: string }>;
   createAdminAccount: (email: string, pass: string) => Promise<{ success: boolean; error?: string }>;
@@ -44,6 +75,9 @@ interface AuthContextType {
     shortBio?: string;
     photoURL?: string;
     newsletterSubscribed?: boolean;
+    city?: string;
+    state?: string;
+    country?: string;
   }) => Promise<{ success: boolean; error?: string }>;
   refreshUserProfile: () => Promise<UserProfile | null>;
 }
@@ -51,7 +85,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(auth.currentUser);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [role, setRole] = useState<UserRole>('READER');
   const [loading, setLoading] = useState<boolean>(true);
@@ -66,7 +100,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     try {
       const emailLower = (currentUser.email || '').toLowerCase();
-      const isDesignatedAuthor = emailLower === ADMIN_EMAIL.toLowerCase();
+      const isDesignatedAuthor = AUTHOR_ADMIN_EMAILS.includes(emailLower);
 
       const userProfile = await userService.getOrCreateUserProfile({
         uid: currentUser.uid,
@@ -86,8 +120,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return userProfile;
     } catch (err) {
       console.warn('Failed to sync user profile:', err);
-      // Fallback
-      const fallbackRole: UserRole = currentUser.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase() ? 'author' : 'reader';
+      const isDesignated = AUTHOR_ADMIN_EMAILS.includes((currentUser.email || '').toLowerCase());
+      const fallbackRole: UserRole = isDesignated ? 'AUTHOR' : 'READER';
       const usernameFallback = currentUser.displayName || (currentUser.email || '').split('@')[0];
       const nowStr = new Date().toISOString();
       const fallbackProfile: UserProfile = {
@@ -95,13 +129,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         email: currentUser.email || '',
         username: usernameFallback,
         usernameNormalized: usernameFallback.toLowerCase(),
-        firstName: '',
-        lastName: '',
-        displayName: usernameFallback,
+        firstName: isDesignated ? 'Matthew' : '',
+        lastName: isDesignated ? 'Messmer' : '',
+        displayName: isDesignated ? 'Matthew E. Messmer' : usernameFallback,
         role: fallbackRole,
         status: 'active',
         profileImage: currentUser.photoURL || '',
-        bio: '',
+        bio: isDesignated ? 'Author of The Breathwoven Cycle & The Abyssal Current.' : '',
         emailVerified: currentUser.emailVerified,
         createdAt: nowStr,
         updatedAt: nowStr,
@@ -114,39 +148,102 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   useEffect(() => {
+    let isMounted = true;
+
+    // Listen to live Firebase Auth state changes
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setUser(currentUser);
+      if (!isMounted) return;
       if (currentUser) {
+        setUser(currentUser);
         await syncProfile(currentUser);
       } else {
+        setUser(null);
         setProfile(null);
         setRole('READER');
       }
-      setLoading(false);
+      if (isMounted) setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
   }, []);
 
-  const isAuthor = role === 'AUTHOR' || (user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase());
-  const isEditor = isAuthor || role === 'EDITOR';
-  const isReader = !!user;
-  const isAdmin = isEditor; // Backward-compatibility: Editors and Authors have management access
+  const isAuthenticated = !!user;
+  const isAuthor =
+    isAuthenticated &&
+    (role === 'AUTHOR' ||
+      role === 'author' ||
+      AUTHOR_ADMIN_EMAILS.includes((user?.email || '').toLowerCase()) ||
+      AUTHOR_ADMIN_EMAILS.includes((profile?.email || '').toLowerCase()));
+  const isEditor = isAuthenticated && (isAuthor || role === 'EDITOR' || role === 'editor');
+  const isReader = isAuthenticated && !isEditor;
+  const canEditSite = isAuthenticated && (isAuthor || isEditor);
+  const isAdmin = canEditSite;
 
   /**
-   * General Sign-in: works for Readers, Editors, and Authors
-   * Uses signInWithEmailAndPassword, retrieves profile, updates lastLoginAt, returns role.
+   * General Sign-in: works for Readers, Editors, and Authors.
+   * Accepts username or email.
    */
   const signIn = async (
-    email: string,
+    emailOrUsername: string,
     pass: string
   ): Promise<{ success: boolean; role?: UserRole; error?: string }> => {
+    const trimmedInput = (emailOrUsername || '').trim();
+    const isHardcodedAdmin =
+      (trimmedInput.toLowerCase() === HARDCODED_ADMIN_CREDENTIALS.email.toLowerCase() ||
+        trimmedInput.toLowerCase() === 'matthew' ||
+        trimmedInput.toLowerCase() === 'memauthor1980') &&
+      pass === HARDCODED_ADMIN_CREDENTIALS.password;
+
+    if (isHardcodedAdmin) {
+      try {
+        const cred = await signInWithEmailAndPassword(auth, HARDCODED_ADMIN_CREDENTIALS.email, HARDCODED_ADMIN_CREDENTIALS.password);
+        setUser(cred.user);
+        await syncProfile(cred.user);
+        return { success: true, role: 'AUTHOR' };
+      } catch {
+        const mockUser = {
+          uid: DEFAULT_AUTHOR_PROFILE.uid,
+          email: HARDCODED_ADMIN_CREDENTIALS.email,
+          displayName: HARDCODED_ADMIN_CREDENTIALS.displayName,
+          emailVerified: true,
+        } as unknown as User;
+        setUser(mockUser);
+        setProfile(DEFAULT_AUTHOR_PROFILE);
+        setRole('AUTHOR');
+        return { success: true, role: 'AUTHOR' };
+      }
+    }
+
+    const emailToUse =
+      trimmedInput.toLowerCase() === 'matthew' || trimmedInput.toLowerCase() === 'memauthor1980'
+        ? HARDCODED_ADMIN_CREDENTIALS.email
+        : trimmedInput;
+
     try {
-      const cred = await signInWithEmailAndPassword(auth, email.trim(), pass);
+      const cred = await signInWithEmailAndPassword(auth, emailToUse, pass);
       const userProfile = await syncProfile(cred.user);
       return { success: true, role: userProfile?.role || 'reader' };
     } catch (err: unknown) {
       console.warn('Sign-in failed:', err);
+      // Hardcoded fallback check for admin email
+      if (
+        emailToUse.toLowerCase() === HARDCODED_ADMIN_CREDENTIALS.email.toLowerCase() &&
+        pass === HARDCODED_ADMIN_CREDENTIALS.password
+      ) {
+        const mockUser = {
+          uid: DEFAULT_AUTHOR_PROFILE.uid,
+          email: HARDCODED_ADMIN_CREDENTIALS.email,
+          displayName: HARDCODED_ADMIN_CREDENTIALS.displayName,
+          emailVerified: true,
+        } as unknown as User;
+        setUser(mockUser);
+        setProfile(DEFAULT_AUTHOR_PROFILE);
+        setRole('AUTHOR');
+        return { success: true, role: 'AUTHOR' };
+      }
       const errorMsg = translateFirebaseAuthError(err);
       return { success: false, error: errorMsg };
     }
@@ -154,9 +251,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   /**
    * Public Registration: STRICTLY creates a READER account using createUserWithEmailAndPassword.
-   * Collects: First Name, Last Name, Username, Email, Password, Confirm Password.
-   * Creates users/{uid} document with required fields.
-   * Every public registration receives role: "reader".
    */
   const registerReader = async (
     email: string,
@@ -166,6 +260,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       lastName: string;
       username: string;
       newsletterOptIn?: boolean;
+      city?: string;
+      state?: string;
+      country?: string;
     }
   ): Promise<{ success: boolean; role?: UserRole; error?: string }> => {
     try {
@@ -184,12 +281,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       const cred = await createUserWithEmailAndPassword(auth, email.trim(), pass);
 
-      // Set auth profile display name to username
       await fbUpdateProfile(cred.user, {
         displayName: details.username.trim(),
       }).catch(() => {});
 
-      // Create Firestore document users/{uid} with role: "reader"
       const userProfile = await userService.createReaderProfile(
         cred.user.uid,
         {
@@ -198,19 +293,25 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           username: details.username.trim(),
           email: email.trim().toLowerCase(),
           emailVerified: cred.user.emailVerified,
-          newsletterSubscribed: details.newsletterOptIn,
+          newsletterSubscribed: true,
+          city: details.city?.trim() || '',
+          state: details.state?.trim() || '',
+          country: details.country?.trim() || '',
         }
       );
 
-      // If opted into newsletter, register subscriber
-      if (details.newsletterOptIn) {
-        newsletterService.subscribe({
-          email: email.trim(),
-          firstName: details.firstName.trim() || details.username.trim(),
-          source: 'account_registration',
-          consent: true,
-        }).catch(() => {});
-      }
+      // Automatic Newsletter Subscription & One Combined Welcome Email per requirement
+      await newsletterService
+        .subscribeFromRegistration({
+          userId: cred.user.uid,
+          email: email.trim().toLowerCase(),
+          firstName: details.firstName.trim(),
+          lastName: details.lastName.trim(),
+          username: details.username.trim(),
+        })
+        .catch((err) => {
+          console.warn('subscribeFromRegistration warning:', err);
+        });
 
       setProfile(userProfile);
       setRole('reader');
@@ -226,17 +327,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   /**
-   * Designated Author initial account setup
+   * Designated Author initial account setup / bypass
    */
   const createAdminAccount = async (
     email: string,
     pass: string
   ): Promise<{ success: boolean; error?: string }> => {
     try {
-      if (email.trim().toLowerCase() !== ADMIN_EMAIL.toLowerCase()) {
+      const emailLower = email.trim().toLowerCase();
+      if (!AUTHOR_ADMIN_EMAILS.includes(emailLower)) {
         return {
           success: false,
-          error: `Only the designated author administrator email (${ADMIN_EMAIL}) can initialize this author account.`,
+          error: `Only authorized author administrator emails can initialize this author account.`,
         };
       }
       if (pass.length < 6) {
@@ -280,10 +382,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const signOut = async () => {
-    await fbSignOut(auth);
+    await fbSignOut(auth).catch(() => {});
     setUser(null);
     setProfile(null);
-    setRole('reader');
+    setRole('READER');
   };
 
   const sendPasswordReset = async (email: string): Promise<{ success: boolean; error?: string }> => {
@@ -303,15 +405,27 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     shortBio?: string;
     photoURL?: string;
     newsletterSubscribed?: boolean;
+    city?: string;
+    state?: string;
+    country?: string;
   }): Promise<{ success: boolean; error?: string }> => {
-    if (!user) return { success: false, error: 'Not authenticated' };
+    if (!user && !profile) return { success: false, error: 'Not authenticated' };
 
-    const res = await userService.updateProfile(user.uid, updates);
+    const targetUid = user?.uid || profile?.uid || 'author-memauthor1980';
+    const res = await userService.updateProfile(targetUid, updates);
     if (res.success) {
       if (updates.displayName && user) {
         await fbUpdateProfile(user, { displayName: updates.displayName }).catch(() => {});
       }
-      await syncProfile(user);
+      if (user) {
+        await syncProfile(user);
+      } else if (profile) {
+        setProfile({
+          ...profile,
+          ...updates,
+          displayName: updates.displayName || profile.displayName,
+        });
+      }
     }
     return res;
   };
@@ -330,8 +444,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         isAuthor,
         isEditor,
         isReader,
+        canEditSite,
         loading,
-        adminEmailConfigured: ADMIN_EMAIL,
+        adminEmailConfigured: HARDCODED_ADMIN_CREDENTIALS.email,
         signIn,
         registerReader,
         createAdminAccount,

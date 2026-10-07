@@ -4,6 +4,7 @@ import {
   getDocs,
   setDoc,
   updateDoc,
+  deleteDoc,
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { ReaderMessage } from '../types';
@@ -156,6 +157,26 @@ class MessageService {
         await updateDoc(doc(db, MESSAGES_COLLECTION, messageId), { status: 'archived' });
       } catch {}
     }
+  }
+
+  /**
+   * Permanently deletes a reader message from Firestore and local cache.
+   */
+  async deleteMessage(messageId: string): Promise<{ success: boolean; error?: string }> {
+    const idx = this.messages.findIndex((m) => m.id === messageId);
+    if (idx >= 0) {
+      this.messages.splice(idx, 1);
+      this.saveState();
+    }
+
+    try {
+      await deleteDoc(doc(db, MESSAGES_COLLECTION, messageId));
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to delete message from Firestore';
+      console.warn('Could not delete message from Firestore (removed locally):', msg);
+    }
+
+    return { success: true };
   }
 }
 

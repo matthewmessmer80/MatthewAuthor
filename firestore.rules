@@ -9,7 +9,11 @@ service cloud.firestore {
 
     function isAuthor() {
       return isAuthenticated() && (
-        request.auth.token.email == 'mmessmer80@gmail.com' ||
+        (request.auth.token.email != null && request.auth.token.email.lower() in [
+          'memauthor1980@gmail.com',
+          'memauthor1980@gamil.com',
+          'mmessmer80@gmail.com'
+        ]) ||
         (exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
          get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role in ['admin', 'author', 'ADMIN', 'AUTHOR']) ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
@@ -36,16 +40,18 @@ service cloud.firestore {
     // Admins registry
     match /admins/{userId} {
       allow read: if isAuthenticated() && (request.auth.uid == userId || isEditor());
-      allow write: if isAuthor();
+      allow write: if isEditor();
     }
 
     // Users registry (Three-Tier User Profiles)
+    // Enforces location & profile privacy: Only designated Author can query/view all users.
+    // Readers and Editors can only read and manage their own user record.
     match /users/{userId} {
-      allow read: if isAuthenticated();
+      allow read: if isAuthor() || (isAuthenticated() && request.auth.uid == userId);
       allow create: if isAuthenticated() && request.auth.uid == userId;
-      allow update: if isAuthenticated() && (
-        isAuthor() ||
-        (request.auth.uid == userId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'status']))
+      allow update: if isAuthor() || (
+        isAuthenticated() && request.auth.uid == userId &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'status'])
       );
       allow delete: if isAuthor();
     }
@@ -53,17 +59,30 @@ service cloud.firestore {
     // Comments collection
     match /comments/{commentId} {
       allow read: if resource == null ||
-                     resource.data.status in ['APPROVED', 'approved'] ||
+                     (resource.data.status in ['APPROVED', 'approved'] && resource.data.status != 'REMOVED_PENDING_DELETION') ||
                      isEditor() ||
-                     (isAuthenticated() && resource.data.userId == request.auth.uid);
+                     (isAuthenticated() && resource.data.userId == request.auth.uid && resource.data.status != 'REMOVED_PENDING_DELETION');
       allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
       allow update: if isEditor() ||
                        (isAuthenticated() &&
                         resource.data.userId == request.auth.uid &&
-                        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'reportCount', 'moderatedBy', 'moderatedAt'])) ||
+                        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'reportCount', 'moderatedBy', 'moderatedAt', 'removedAt', 'scheduledDeletionAt', 'removalReason', 'removedBy'])) ||
                        (isAuthenticated() &&
                         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reportCount', 'status']));
-      allow delete: if isAuthor();
+      allow delete: if isEditor() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+    }
+
+    // Discussions collection (Community Discussions Board)
+    match /discussions/{discussionId} {
+      allow read: if true;
+      allow create: if isAuthenticated() &&
+                       request.resource.data.authorId == request.auth.uid &&
+                       request.resource.data.rulesAgreed == true;
+      allow update: if isEditor() ||
+                       (isAuthenticated() &&
+                        resource.data.authorId == request.auth.uid &&
+                        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['pinned', 'locked']));
+      allow delete: if isEditor() || (isAuthenticated() && resource.data.authorId == request.auth.uid);
     }
 
     // Comment Reports collection
@@ -86,11 +105,7 @@ service cloud.firestore {
 
     // Books collection
     match /books/{bookId} {
-      allow read: if resource == null || 
-                     resource.data.publicationState == 'PUBLIC' || 
-                     resource.data.publicationState == 'TEASER' || 
-                     resource.data.status == 'published' || 
-                     isEditor();
+      allow read: if true;
       allow update: if isEditor();
       allow create, delete: if isAuthor();
     }
@@ -102,16 +117,39 @@ service cloud.firestore {
       allow create, delete: if isAuthor();
     }
 
-    // Stories collection
+    // Stories collection: creation and deletion strictly Author-only; update for editors
     match /stories/{storyId} {
       allow read: if true;
-      allow write: if isAuthor();
+      allow create, delete: if isAuthor();
+      allow update: if isEditor();
     }
 
-    // News collection
+    // News & Dispatches collection
     match /news/{newsId} {
       allow read: if true;
-      allow write: if isAuthor();
+      allow create, update: if isEditor();
+      allow delete: if isAuthor();
+    }
+
+    // Gallery collection
+    match /gallery/{itemId} {
+      allow read: if true;
+      allow create, update: if isEditor();
+      allow delete: if isAuthor();
+    }
+
+    // Characters collection
+    match /characters/{characterId} {
+      allow read: if true;
+      allow create, update: if isEditor();
+      allow delete: if isAuthor();
+    }
+
+    // Lore & Worldbuilding collection
+    match /lore/{loreId} {
+      allow read: if true;
+      allow create, update: if isEditor();
+      allow delete: if isAuthor();
     }
 
     // Media library collection
@@ -125,9 +163,40 @@ service cloud.firestore {
       allow create: if request.resource.data.email is string && 
                        request.resource.data.consentGiven == true;
       allow update: if isAuthor() || 
-                       (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'unsubscribedAt']) &&
-                        request.resource.data.status == 'unsubscribed');
+                       (isAuthenticated() && request.auth.uid == request.resource.data.userId) ||
+                       (request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                         'status', 'unsubscribedAt', 'welcomeEmailStatus', 'welcomeEmailSentAt',
+                         'welcomeEmailEventId', 'welcomeEmailType', 'welcomeEmailError',
+                         'userId', 'username', 'updatedAt'
+                       ]));
       allow read, delete: if isAuthor();
+    }
+
+    // Email Events Collection (Idempotent Welcome Email Tracking)
+    match /emailEvents/{eventId} {
+      allow read: if true;
+      allow create: if request.resource.data.recipientEmail is string &&
+                       request.resource.data.emailType in ['NEWSLETTER_WELCOME', 'ACCOUNT_AND_NEWSLETTER_WELCOME'];
+      allow update: if isAuthor() ||
+                       (request.resource.data.recipientEmail is string &&
+                        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                          'deliveryStatus', 'sentAt', 'providerMessageId', 'serverUpdatedAt', 'error', 'retryCount'
+                        ]));
+      allow delete: if isAuthor();
+    }
+
+    // Author-managed welcome email templates
+    match /emailTemplates/{templateId} {
+      allow read: if true;
+      allow write: if isAuthor();
+    }
+
+    // Firebase Trigger Email mail collection
+    match /mail/{mailId} {
+      allow read: if isEditor();
+      allow create: if request.resource.data.to != null &&
+                       request.resource.data.message.subject is string;
+      allow update, delete: if isAuthor();
     }
 
     // Newsletters collection: author-only
@@ -157,6 +226,13 @@ service cloud.firestore {
                        (resource != null &&
                         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['viewCount']));
       allow delete: if isAuthor();
+    }
+
+    // Songs & Music Library
+    match /songs/{songId} {
+      allow read: if true;
+      allow update: if isEditor();
+      allow create, delete: if isAuthor();
     }
   }
 }

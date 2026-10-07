@@ -168,7 +168,7 @@ class SEOService {
         '@type': 'Organization',
         name: book.publisher || 'Breathwoven Press',
       },
-      workExample: book.format.map((fmt) => ({
+      workExample: (book.format || ['Hardcover', 'Paperback', 'E-Book']).map((fmt) => ({
         '@type': 'Book',
         bookFormat: fmt.toLowerCase().includes('hardcover')
           ? 'https://schema.org/Hardcover'
@@ -353,7 +353,7 @@ class SEOService {
 
     // 4. THE ABYSSAL CURRENT
     if (routeId === 'abyssal' || routeId === 'the-abyssal-current') {
-      const book = BOOKS.find((b) => b.id === 'abyssal-current') || BOOKS[3];
+      const book = BOOKS.find((b) => b.id === 'ignis-kor' || b.seriesId === 'series-1791135616897') || BOOKS[0];
       return {
         title: 'The Abyssal Current | Matthew E. Messmer',
         description:

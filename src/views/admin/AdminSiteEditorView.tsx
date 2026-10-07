@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { siteContentService, DEFAULT_HOMEPAGE_CONTENT } from '../../services/siteContentService';
 import { bookService, ManagedBook } from '../../services/bookService';
-import { HomepageContent } from '../../types';
+import { storyService } from '../../services/storyService';
+import { HomepageContent, Story } from '../../types';
 import {
   Globe,
   Save,
@@ -16,6 +17,8 @@ import {
   AlertCircle,
   Eye,
   Sliders,
+  Calendar,
+  Pin,
   Image as ImageIcon,
 } from 'lucide-react';
 
@@ -23,12 +26,14 @@ export const AdminSiteEditorView: React.FC = () => {
   const { isAuthor } = useAuth();
   const [content, setContent] = useState<HomepageContent>(siteContentService.getContent());
   const [books, setBooks] = useState<ManagedBook[]>([]);
-  const [activeTab, setActiveTab] = useState<'hero' | 'sections' | 'author' | 'footer'>('hero');
+  const [stories, setStories] = useState<Story[]>([]);
+  const [activeTab, setActiveTab] = useState<'hero' | 'featured' | 'sections' | 'author' | 'footer'>('hero');
   const [saving, setSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
 
   useEffect(() => {
     bookService.getBooks().then(setBooks);
+    storyService.getStories().then(setStories);
     const unsub = siteContentService.subscribe((newContent) => {
       setContent(newContent);
     });
@@ -106,7 +111,18 @@ export const AdminSiteEditorView: React.FC = () => {
           }`}
         >
           <Type className="w-3.5 h-3.5" />
-          <span>Hero & Featured Work</span>
+          <span>Hero & Brand Copy</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('featured')}
+          className={`px-4 py-2 text-xs font-cinzel rounded-lg flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap ${
+            activeTab === 'featured'
+              ? 'bg-[#c5a059] text-[#0c0d12] font-bold'
+              : 'text-[#a8a396] hover:bg-[#161825]'
+          }`}
+        >
+          <Calendar className="w-3.5 h-3.5" />
+          <span>Monthly Featured Rotation (Author Override)</span>
         </button>
         <button
           onClick={() => setActiveTab('sections')}
@@ -249,6 +265,208 @@ export const AdminSiteEditorView: React.FC = () => {
                 />
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Tab: Monthly Featured Rotation (Author Override) */}
+        {activeTab === 'featured' && (
+          <div className="bg-[#11131c] border border-[#232635] rounded-2xl p-6 sm:p-8 space-y-6">
+            <div className="border-b border-[#212334] pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-base font-cinzel font-bold text-[#f5efeb] flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-[#c5a059]" />
+                  <span>Dynamic Monthly Featured Item Rotation</span>
+                </h3>
+                <p className="text-xs text-[#8e887a] mt-1">
+                  The homepage showcases a featured book or short story each month. By default, it automatically rotates through published works. As Author, you can set a manual spotlight override anytime.
+                </p>
+              </div>
+
+              <div className="px-3 py-1 bg-[#161828] border border-[#2b2e40] rounded-lg text-xs font-cinzel text-[#c5a059] self-start sm:self-auto shrink-0">
+                Mode: {content.monthlyFeatured?.mode === 'override' ? 'Author Override Active' : 'Automatic Rotation'}
+              </div>
+            </div>
+
+            {/* Mode Selector */}
+            <div className="space-y-4">
+              <label className="text-xs font-cinzel text-[#dcd7cb] font-bold block uppercase tracking-wider">
+                Select Featured Mode
+              </label>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div
+                  onClick={() =>
+                    setContent({
+                      ...content,
+                      monthlyFeatured: {
+                        ...(content.monthlyFeatured || { mode: 'auto' }),
+                        mode: 'auto',
+                      },
+                    })
+                  }
+                  className={`p-4 rounded-xl border transition-all cursor-pointer space-y-2 ${
+                    content.monthlyFeatured?.mode !== 'override'
+                      ? 'bg-[#151829] border-[#c5a059] shadow-md shadow-[#c5a059]/10'
+                      : 'bg-[#121420] border-[#242738] hover:border-[#383b52]'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-cinzel font-bold text-[#f5efeb] flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-[#c5a059]" />
+                      <span>Automatic Monthly Rotation (Default)</span>
+                    </span>
+                    <span className="text-[10px] font-cinzel text-[#c5a059] bg-[#c5a059]/15 px-2 py-0.5 rounded">
+                      Algorithmic
+                    </span>
+                  </div>
+                  <p className="text-xs text-[#9d978a] leading-relaxed">
+                    Automatically computes a deterministic selection each calendar month from published books and short stories. Keeps the homepage dynamic without manual intervention.
+                  </p>
+                </div>
+
+                <div
+                  onClick={() =>
+                    setContent({
+                      ...content,
+                      monthlyFeatured: {
+                        mode: 'override',
+                        overrideType: content.monthlyFeatured?.overrideType || 'book',
+                        overrideId: content.monthlyFeatured?.overrideId || books[0]?.id || 'kings-severance',
+                        customNote: content.monthlyFeatured?.customNote || 'Author’s curated feature for this month.',
+                      },
+                    })
+                  }
+                  className={`p-4 rounded-xl border transition-all cursor-pointer space-y-2 ${
+                    content.monthlyFeatured?.mode === 'override'
+                      ? 'bg-[#151829] border-[#c5a059] shadow-md shadow-[#c5a059]/10'
+                      : 'bg-[#121420] border-[#242738] hover:border-[#383b52]'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-cinzel font-bold text-[#f5efeb] flex items-center gap-2">
+                      <Pin className="w-4 h-4 text-amber-400" />
+                      <span>Author Manual Spotlight Override</span>
+                    </span>
+                    <span className="text-[10px] font-cinzel text-amber-300 bg-amber-500/15 px-2 py-0.5 rounded">
+                      Manual
+                    </span>
+                  </div>
+                  <p className="text-xs text-[#9d978a] leading-relaxed">
+                    Manually spotlight a specific book or short story of your choice, complete with an author's custom commentary note.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Override Controls */}
+            {content.monthlyFeatured?.mode === 'override' && (
+              <div className="p-5 bg-[#141624] border border-[#2c3046] rounded-xl space-y-4 animate-in fade-in">
+                <span className="text-xs font-cinzel font-bold text-[#c5a059] block uppercase tracking-wider">
+                  Author Spotlight Override Parameters
+                </span>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-cinzel text-[#dcd7cb] block mb-1">
+                      Featured Work Type
+                    </label>
+                    <select
+                      value={content.monthlyFeatured?.overrideType || 'book'}
+                      onChange={(e) => {
+                        const nextType = e.target.value as 'book' | 'story';
+                        setContent({
+                          ...content,
+                          monthlyFeatured: {
+                            mode: 'override',
+                            overrideType: nextType,
+                            overrideId: nextType === 'book' ? books[0]?.id || 'kings-severance' : stories[0]?.id || 'story-1',
+                            customNote: content.monthlyFeatured?.customNote || '',
+                          },
+                        });
+                      }}
+                      className="w-full bg-[#161828] border border-[#2b2e40] focus:border-[#c5a059] focus:outline-none rounded-lg px-3 py-2 text-xs text-[#f5efeb]"
+                    >
+                      <option value="book">Book Focus</option>
+                      <option value="story">Short Story Focus</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-cinzel text-[#dcd7cb] block mb-1">
+                      Target {content.monthlyFeatured?.overrideType === 'story' ? 'Short Story' : 'Book'}
+                    </label>
+                    {content.monthlyFeatured?.overrideType === 'story' ? (
+                      <select
+                        value={content.monthlyFeatured?.overrideId || ''}
+                        onChange={(e) =>
+                          setContent({
+                            ...content,
+                            monthlyFeatured: {
+                              mode: 'override',
+                              overrideType: 'story',
+                              overrideId: e.target.value,
+                              customNote: content.monthlyFeatured?.customNote || '',
+                            },
+                          })
+                        }
+                        className="w-full bg-[#161828] border border-[#2b2e40] focus:border-[#c5a059] focus:outline-none rounded-lg px-3 py-2 text-xs text-[#f5efeb]"
+                      >
+                        {stories.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.title} ({s.universe})
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <select
+                        value={content.monthlyFeatured?.overrideId || ''}
+                        onChange={(e) =>
+                          setContent({
+                            ...content,
+                            monthlyFeatured: {
+                              mode: 'override',
+                              overrideType: 'book',
+                              overrideId: e.target.value,
+                              customNote: content.monthlyFeatured?.customNote || '',
+                            },
+                          })
+                        }
+                        className="w-full bg-[#161828] border border-[#2b2e40] focus:border-[#c5a059] focus:outline-none rounded-lg px-3 py-2 text-xs text-[#f5efeb]"
+                      >
+                        {books.map((b) => (
+                          <option key={b.id} value={b.id}>
+                            {b.title} (Book {b.seriesOrder})
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-cinzel text-[#dcd7cb] block mb-1">
+                    Custom Author Spotlight Note
+                  </label>
+                  <input
+                    type="text"
+                    value={content.monthlyFeatured?.customNote || ''}
+                    onChange={(e) =>
+                      setContent({
+                        ...content,
+                        monthlyFeatured: {
+                          mode: 'override',
+                          overrideType: content.monthlyFeatured?.overrideType || 'book',
+                          overrideId: content.monthlyFeatured?.overrideId || books[0]?.id || 'kings-severance',
+                          customNote: e.target.value,
+                        },
+                      })
+                    }
+                    placeholder="e.g., Handpicked by Matthew E. Messmer for readers beginning their journey."
+                    className="w-full bg-[#161828] border border-[#2b2e40] focus:border-[#c5a059] focus:outline-none rounded-lg px-3 py-2 text-xs text-[#f5efeb]"
+                  />
+                </div>
+              </div>
+            )}
           </div>
         )}
 

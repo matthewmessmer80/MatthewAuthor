@@ -40,9 +40,11 @@ export const ReadingRoomModal: React.FC<ReadingRoomModalProps> = ({
   }[theme];
 
   const accentColor = book.accentColor || '#c5a059';
+  const excerpt = book.excerpt || { chapterTitle: 'Prologue', text: ['Excerpt coming soon.'] };
+  const quote = book.quote || { text: 'Words carry breath across worlds.', attribution: 'Matthew E. Messmer' };
 
   const handleCopyQuote = () => {
-    navigator.clipboard.writeText(`"${book.quote.text}" — ${book.title} by Matthew E. Messmer`);
+    navigator.clipboard.writeText(`"${quote.text}" — ${book.title} by Matthew E. Messmer`);
     setCopiedQuote(true);
     setTimeout(() => setCopiedQuote(false), 2000);
   };
@@ -144,7 +146,7 @@ export const ReadingRoomModal: React.FC<ReadingRoomModalProps> = ({
               By Matthew E. Messmer
             </p>
             <div className="mt-4 inline-block px-3 py-1 text-xs font-serif uppercase tracking-wider border border-current/20 rounded-full opacity-75">
-              {book.excerpt.chapterTitle}
+              {excerpt.chapterTitle}
             </div>
           </div>
 
@@ -159,7 +161,7 @@ export const ReadingRoomModal: React.FC<ReadingRoomModalProps> = ({
             }`}
           >
             <div className="flex items-start justify-between gap-3">
-              <p>"{book.quote.text}"</p>
+              <p>"{quote.text}"</p>
               <button
                 onClick={handleCopyQuote}
                 title="Copy quote"
@@ -173,13 +175,13 @@ export const ReadingRoomModal: React.FC<ReadingRoomModalProps> = ({
               </button>
             </div>
             <p className="text-xs not-italic font-sans font-medium uppercase tracking-wider mt-2 opacity-70">
-              — {book.quote.attribution}
+              — {quote.attribution}
             </p>
           </div>
 
           {/* Chapter Text */}
           <div className={`font-reading ${fontClasses} max-w-2xl mx-auto space-y-5`}>
-            {book.excerpt.text.map((paragraph, idx) => {
+            {excerpt.text.map((paragraph, idx) => {
               if (idx === 0) {
                 return (
                   <p key={idx} className="drop-cap-lead">

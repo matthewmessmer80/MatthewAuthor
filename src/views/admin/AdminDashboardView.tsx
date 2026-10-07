@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { bookService, ManagedBook, AuditLogItem } from '../../services/bookService';
+import { bookService, ManagedBook, ManagedSeries, AuditLogItem } from '../../services/bookService';
 import { adminNewsletterService } from '../../services/adminNewsletterService';
 import { newsletterService } from '../../services/newsletterService';
 import { seoService } from '../../services/seoService';
 import { commentService } from '../../services/commentService';
 import { messageService } from '../../services/messageService';
+import { newsService } from '../../services/newsService';
+import { galleryService } from '../../services/galleryService';
+import { characterLoreService } from '../../services/characterLoreService';
 import { AdminBooksListView } from './AdminBooksListView';
 import { AdminBookEditorView } from './AdminBookEditorView';
 import { AdminSeriesView } from './AdminSeriesView';
@@ -22,7 +25,9 @@ import { AdminModerationView } from './AdminModerationView';
 import { AdminMessagesView } from './AdminMessagesView';
 import { AdminBackupView } from './AdminBackupView';
 import { AdminBookPreviewModal } from './AdminBookPreviewModal';
+import { AdminSongsView } from './AdminSongsView';
 import { AdminSeoDashboard } from '../../components/AdminSeoDashboard';
+import { songService } from '../../services/songService';
 import { STORIES, NEWS_ARTICLES, CRAFT_ARTWORKS } from '../../data/authorData';
 import {
   Shield,
@@ -53,6 +58,9 @@ import {
   ArrowRight,
   Upload,
   Download,
+  Loader2,
+  RefreshCw,
+  Music,
 } from 'lucide-react';
 
 export type AdminTab =
@@ -65,6 +73,7 @@ export type AdminTab =
   | 'book-editor'
   | 'series'
   | 'stories'
+  | 'songs'
   | 'news'
   | 'gallery'
   | 'worldbuilding'
@@ -79,12 +88,14 @@ interface AdminDashboardViewProps {
   onPreviewBookPublic?: (book: ManagedBook) => void;
   initialTab?: AdminTab | 'books-new';
   editingBookId?: string | null;
+  initialSeriesAction?: 'new' | null;
 }
 
 export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   onReturnToSite,
   initialTab = 'dashboard',
   editingBookId = null,
+  initialSeriesAction = null,
 }) => {
   const { user, profile, role, isAuthor, isEditor, signOut, adminEmailConfigured } = useAuth();
 
@@ -93,7 +104,12 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   );
 
   const [activeEditingBookId, setActiveEditingBookId] = useState<string | null>(editingBookId);
-  const [books, setBooks] = useState<ManagedBook[]>([]);
+  const [books, setBooks] = useState<ManagedBook[]>(() => bookService.getCachedBooks());
+  const [seriesList, setSeriesList] = useState<ManagedSeries[]>(() => bookService.getCachedSeries());
+  const [booksLoading, setBooksLoading] = useState<boolean>(() => bookService.isBooksLoading());
+  const [seriesLoading, setSeriesLoading] = useState<boolean>(() => bookService.isSeriesLoading());
+  const [booksError, setBooksError] = useState<Error | null>(() => bookService.getBooksError());
+  const [seriesError, setSeriesError] = useState<Error | null>(() => bookService.getSeriesError());
   const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [previewingBook, setPreviewingBook] = useState<ManagedBook | null>(null);
@@ -103,12 +119,45 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   const [flaggedCommentsCount, setFlaggedCommentsCount] = useState(0);
   const [reportsCount, setReportsCount] = useState(0);
   const [unreadMessagesCount, setUnreadMessagesCount] = useState(0);
+  const [newsCount, setNewsCount] = useState(0);
+  const [galleryCount, setGalleryCount] = useState(0);
+  const [charactersCount, setCharactersCount] = useState(0);
+  const [loreCount, setLoreCount] = useState(0);
 
   const loadData = async () => {
-    const b = await bookService.getBooks();
-    const logs = await bookService.getAuditLogs();
-    setBooks(b);
-    setAuditLogs(logs);
+    try {
+      const [b, logs, s] = await Promise.all([
+        bookService.getAllBooks(),
+        bookService.getAuditLogs(),
+        bookService.getAllSeries(),
+      ]);
+      setBooks(b);
+      setAuditLogs(logs);
+      setSeriesList(s);
+      setBooksLoading(false);
+      setSeriesLoading(false);
+      setBooksError(null);
+      setSeriesError(null);
+
+      // Diagnostic logging per Requirement 14
+      if (process.env.NODE_ENV !== 'production') {
+        console.info('[Author Diagnostics]', {
+          firebaseProject: 'gen-lang-client-0633133056',
+          booksCollection: 'books',
+          booksCount: b.length,
+          seriesCollection: 'series',
+          seriesCount: s.length,
+        });
+      }
+    } catch (err: any) {
+      console.error('[AdminDashboardView] Error refreshing Firestore data:', err);
+      setBooks(bookService.getCachedBooks());
+      setSeriesList(bookService.getCachedSeries());
+      setBooksLoading(false);
+      setSeriesLoading(false);
+      setBooksError(bookService.getBooksError());
+      setSeriesError(bookService.getSeriesError());
+    }
 
     // Fetch moderation and messages stats
     try {
@@ -125,9 +174,31 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
 
   useEffect(() => {
     loadData();
-    const unsub = bookService.subscribe(loadData);
-    return () => unsub();
+    const unsubBooks = bookService.subscribe(() => {
+      setBooks(bookService.getCachedBooks());
+      setSeriesList(bookService.getCachedSeries());
+      setBooksLoading(bookService.isBooksLoading());
+      setSeriesLoading(bookService.isSeriesLoading());
+      setBooksError(bookService.getBooksError());
+      setSeriesError(bookService.getSeriesError());
+    });
+    const unsubNews = newsService.subscribe((list) => setNewsCount(list.length));
+    const unsubGallery = galleryService.subscribe((list) => setGalleryCount(list.length));
+    const unsubChars = characterLoreService.subscribeCharacters((list) => setCharactersCount(list.length));
+    const unsubLore = characterLoreService.subscribeLore((list) => setLoreCount(list.length));
+    const unsubSongs = songService.subscribe((list) => setSongsCount(list.length));
+
+    return () => {
+      unsubBooks();
+      unsubNews();
+      unsubGallery();
+      unsubChars();
+      unsubLore();
+      unsubSongs();
+    };
   }, []);
+
+  const [songsCount, setSongsCount] = useState<number>(songService.getCachedSongs().length);
 
   const totalBooks = books.length;
   const publishedBooks = books.filter((b) => b.publicationState === 'PUBLIC').length;
@@ -148,12 +219,13 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
     { id: 'users', label: 'User Management', icon: Users },
     { id: 'moderation', label: 'Moderation', icon: ShieldAlert, badge: pendingCommentsCount + flaggedCommentsCount },
     { id: 'messages', label: 'Messages', icon: Mail, badge: unreadMessagesCount },
-    { id: 'books', label: 'Books', icon: BookOpen },
-    { id: 'series', label: 'Series', icon: Layers },
-    { id: 'stories', label: 'Stories', icon: FeatherIcon },
-    { id: 'news', label: 'News', icon: FileText },
-    { id: 'gallery', label: 'Gallery', icon: ImageIcon },
-    { id: 'worldbuilding', label: 'Characters & Lore', icon: Compass },
+    { id: 'books', label: 'Books', icon: BookOpen, badge: books.length > 0 ? books.length : undefined },
+    { id: 'series', label: 'Series', icon: Layers, badge: seriesList.length > 0 ? seriesList.length : undefined },
+    { id: 'stories', label: 'Short Stories', icon: FeatherIcon },
+    { id: 'songs', label: 'Songs & Music', icon: Music, badge: songsCount > 0 ? songsCount : undefined },
+    { id: 'news', label: 'News', icon: FileText, badge: newsCount > 0 ? newsCount : undefined },
+    { id: 'gallery', label: 'Gallery', icon: ImageIcon, badge: galleryCount > 0 ? galleryCount : undefined },
+    { id: 'worldbuilding', label: 'Characters & Lore', icon: Compass, badge: (charactersCount + loreCount) > 0 ? (charactersCount + loreCount) : undefined },
     { id: 'newsletter', label: 'Newsletter', icon: Mail },
     { id: 'seo', label: 'SEO', icon: Search },
     { id: 'settings', label: 'Site Settings', icon: Settings },
@@ -165,8 +237,10 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
     { id: 'dashboard', label: 'Editor Dashboard', icon: Home },
     { id: 'moderation', label: 'Moderation', icon: ShieldAlert, badge: pendingCommentsCount + flaggedCommentsCount },
     { id: 'messages', label: 'Messages', icon: Mail, badge: unreadMessagesCount },
-    { id: 'books', label: 'Books', icon: BookOpen },
-    { id: 'series', label: 'Series', icon: Layers },
+    { id: 'books', label: 'Books', icon: BookOpen, badge: books.length > 0 ? books.length : undefined },
+    { id: 'series', label: 'Series', icon: Layers, badge: seriesList.length > 0 ? seriesList.length : undefined },
+    { id: 'stories', label: 'Short Stories', icon: FeatherIcon },
+    { id: 'songs', label: 'Songs & Music', icon: Music, badge: songsCount > 0 ? songsCount : undefined },
     { id: 'account', label: 'My Account', icon: User },
   ];
 
@@ -186,7 +260,8 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
         books: isAuthor ? '/admin/books' : '/editor/books',
         'book-editor': isAuthor ? '/admin/books/new' : '/editor/books/new',
         series: isAuthor ? '/admin/series' : '/editor/series',
-        stories: '/admin/stories',
+        stories: isAuthor ? '/admin/stories' : '/editor/stories',
+        songs: isAuthor ? '/admin/music' : '/editor/music',
         news: '/admin/news',
         gallery: '/admin/media',
         worldbuilding: '/admin/worldbuilding',
@@ -458,7 +533,9 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                         className="p-5 rounded-xl bg-[#11131c] border border-[#232635] hover:border-[#c5a059]/40 transition-colors cursor-pointer space-y-2"
                       >
                         <div className="flex items-center justify-between">
-                          <span className="text-xs font-cinzel uppercase text-[#8e887a]">Books ({totalBooks})</span>
+                          <span className="text-xs font-cinzel uppercase text-[#8e887a]">
+                            Books ({booksLoading && books.length === 0 ? 'Loading...' : totalBooks})
+                          </span>
                           <BookOpen className="w-4 h-4 text-[#c5a059]" />
                         </div>
                         <p className="text-xs text-[#d6d0c4]">
@@ -471,7 +548,9 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                         className="p-5 rounded-xl bg-[#11131c] border border-[#232635] hover:border-[#c5a059]/40 transition-colors cursor-pointer space-y-2"
                       >
                         <div className="flex items-center justify-between">
-                          <span className="text-xs font-cinzel uppercase text-[#8e887a]">Series (2)</span>
+                          <span className="text-xs font-cinzel uppercase text-[#8e887a]">
+                            Series ({seriesLoading && seriesList.length === 0 ? 'Loading...' : seriesList.length})
+                          </span>
                           <Layers className="w-4 h-4 text-sky-400" />
                         </div>
                         <p className="text-xs text-[#d6d0c4]">
@@ -498,12 +577,55 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                       <BookOpen className="w-4 h-4 text-[#c5a059]" />
                     </div>
                     <div className="text-3xl font-cinzel font-bold text-[#f5efeb]">
-                      {totalBooks}
+                      {booksLoading && books.length === 0 ? (
+                        <span className="text-xs font-sans text-[#8e887a] flex items-center gap-1.5 font-normal">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-[#c5a059]" />
+                          Loading books...
+                        </span>
+                      ) : booksError && books.length === 0 ? (
+                        <span className="text-xs text-rose-400 font-sans font-normal">Error loading books</span>
+                      ) : (
+                        totalBooks
+                      )}
                     </div>
                     <div className="text-[11px] text-[#7d776a] flex items-center gap-1.5 flex-wrap">
                       <span className="text-emerald-400 font-medium">{publishedBooks} Published</span>
                       <span>·</span>
                       <span className="text-amber-400 font-medium">{draftBooks} Draft</span>
+                      {teaserBooks > 0 && (
+                        <>
+                          <span>·</span>
+                          <span className="text-sky-400 font-medium">{teaserBooks} Teaser</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Series Card */}
+                  <div
+                    onClick={() => handleNavClick('series')}
+                    className="p-5 rounded-xl bg-[#11131c] border border-[#232635] hover:border-[#c5a059]/40 transition-colors cursor-pointer space-y-2 group"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-cinzel uppercase text-[#8e887a] group-hover:text-[#c5a059]">
+                        Series
+                      </span>
+                      <Layers className="w-4 h-4 text-sky-400" />
+                    </div>
+                    <div className="text-3xl font-cinzel font-bold text-[#f5efeb]">
+                      {seriesLoading && seriesList.length === 0 ? (
+                        <span className="text-xs font-sans text-[#8e887a] flex items-center gap-1.5 font-normal">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" />
+                          Loading series...
+                        </span>
+                      ) : seriesError && seriesList.length === 0 ? (
+                        <span className="text-xs text-rose-400 font-sans font-normal">Error loading series</span>
+                      ) : (
+                        seriesList.length
+                      )}
+                    </div>
+                    <div className="text-[11px] text-[#7d776a]">
+                      Universes & reading orders
                     </div>
                   </div>
 
@@ -542,6 +664,63 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                     </div>
                     <div className="text-[11px] text-[#7d776a]">
                       {pendingCommentsCount} pending · {flaggedCommentsCount} flagged
+                    </div>
+                  </div>
+
+                  {/* News & Dispatches Card */}
+                  <div
+                    onClick={() => handleNavClick('news')}
+                    className="p-5 rounded-xl bg-[#11131c] border border-[#232635] hover:border-[#c5a059]/40 transition-colors cursor-pointer space-y-2 group"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-cinzel uppercase text-[#8e887a] group-hover:text-[#c5a059]">
+                        News & Dispatches
+                      </span>
+                      <FileText className="w-4 h-4 text-amber-400" />
+                    </div>
+                    <div className="text-3xl font-cinzel font-bold text-[#f5efeb]">
+                      {newsCount}
+                    </div>
+                    <div className="text-[11px] text-[#7d776a]">
+                      Announcements & progress reports
+                    </div>
+                  </div>
+
+                  {/* Gallery Card */}
+                  <div
+                    onClick={() => handleNavClick('gallery')}
+                    className="p-5 rounded-xl bg-[#11131c] border border-[#232635] hover:border-[#c5a059]/40 transition-colors cursor-pointer space-y-2 group"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-cinzel uppercase text-[#8e887a] group-hover:text-[#c5a059]">
+                        Gallery
+                      </span>
+                      <ImageIcon className="w-4 h-4 text-teal-400" />
+                    </div>
+                    <div className="text-3xl font-cinzel font-bold text-[#f5efeb]">
+                      {galleryCount}
+                    </div>
+                    <div className="text-[11px] text-[#7d776a]">
+                      Wood relief & visual assets
+                    </div>
+                  </div>
+
+                  {/* Characters & Lore Card */}
+                  <div
+                    onClick={() => handleNavClick('worldbuilding')}
+                    className="p-5 rounded-xl bg-[#11131c] border border-[#232635] hover:border-[#c5a059]/40 transition-colors cursor-pointer space-y-2 group"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-cinzel uppercase text-[#8e887a] group-hover:text-[#c5a059]">
+                        Characters & Lore
+                      </span>
+                      <Compass className="w-4 h-4 text-rose-400" />
+                    </div>
+                    <div className="text-3xl font-cinzel font-bold text-[#f5efeb]">
+                      {charactersCount + loreCount}
+                    </div>
+                    <div className="text-[11px] text-[#7d776a]">
+                      {charactersCount} Characters · {loreCount} Lore entries
                     </div>
                   </div>
 
@@ -588,6 +767,63 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                       <div className="flex items-center gap-1.5 text-xs font-cinzel text-[#c5a059] group-hover:translate-x-1 transition-transform self-end sm:self-auto shrink-0">
                         <span>Open Backup Tool</span>
                         <ArrowRight className="w-3.5 h-3.5" />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* System & Firestore Diagnostics (Author Only - Requirement 14) */}
+                  <div className="p-5 rounded-xl bg-[#0d0e16] border border-[#212437] sm:col-span-2 lg:col-span-4 space-y-3">
+                    <div className="flex items-center justify-between border-b border-[#1d2030] pb-2.5">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                        <span className="text-xs font-cinzel font-bold text-[#f5efeb] uppercase tracking-wider">
+                          Author Database Diagnostic
+                        </span>
+                        <span className="px-1.5 py-0.5 bg-emerald-950/60 border border-emerald-600/40 text-emerald-300 rounded text-[9px] font-mono">
+                          Connected (Online)
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-[#787367] font-mono">Author-only verification</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
+                      <div className="bg-[#121420] p-2.5 rounded-lg border border-[#1e2133]">
+                        <span className="text-[10px] uppercase text-[#787367] block font-sans">Firebase Project:</span>
+                        <span className="text-emerald-400 font-bold break-all">gen-lang-client-0633133056</span>
+                      </div>
+                      <div className="bg-[#121420] p-2.5 rounded-lg border border-[#1e2133]">
+                        <span className="text-[10px] uppercase text-[#787367] block font-sans">Books Collection:</span>
+                        <span className="text-[#f5efeb] font-bold">books</span>
+                        <span className="text-[#8e887a] ml-1">({totalBooks} Found)</span>
+                      </div>
+                      <div className="bg-[#121420] p-2.5 rounded-lg border border-[#1e2133]">
+                        <span className="text-[10px] uppercase text-[#787367] block font-sans">Series Collection:</span>
+                        <span className="text-[#f5efeb] font-bold">series</span>
+                        <span className="text-[#8e887a] ml-1">({seriesList.length} Found)</span>
+                      </div>
+                      <div className="bg-[#121420] p-2.5 rounded-lg border border-[#1e2133]">
+                        <span className="text-[10px] uppercase text-[#787367] block font-sans">News Collection:</span>
+                        <span className="text-[#f5efeb] font-bold">news</span>
+                        <span className="text-[#8e887a] ml-1">({newsCount} Found)</span>
+                      </div>
+                      <div className="bg-[#121420] p-2.5 rounded-lg border border-[#1e2133]">
+                        <span className="text-[10px] uppercase text-[#787367] block font-sans">Gallery Collection:</span>
+                        <span className="text-[#f5efeb] font-bold">gallery</span>
+                        <span className="text-[#8e887a] ml-1">({galleryCount} Found)</span>
+                      </div>
+                      <div className="bg-[#121420] p-2.5 rounded-lg border border-[#1e2133]">
+                        <span className="text-[10px] uppercase text-[#787367] block font-sans">Characters Collection:</span>
+                        <span className="text-[#f5efeb] font-bold">characters</span>
+                        <span className="text-[#8e887a] ml-1">({charactersCount} Found)</span>
+                      </div>
+                      <div className="bg-[#121420] p-2.5 rounded-lg border border-[#1e2133]">
+                        <span className="text-[10px] uppercase text-[#787367] block font-sans">Lore Collection:</span>
+                        <span className="text-[#f5efeb] font-bold">lore</span>
+                        <span className="text-[#8e887a] ml-1">({loreCount} Found)</span>
+                      </div>
+                      <div className="bg-[#121420] p-2.5 rounded-lg border border-[#1e2133]">
+                        <span className="text-[10px] uppercase text-[#787367] block font-sans">Sync Mode:</span>
+                        <span className="text-[#c5a059] font-bold">Realtime Listeners</span>
                       </div>
                     </div>
                   </div>
@@ -651,6 +887,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
           {/* TAB 2: BOOKS LIST */}
           {currentTab === 'books' && (
             <AdminBooksListView
+              initialBooks={books}
               onAddNew={isAuthor ? handleStartAddNewBook : () => {}}
               onEditBook={handleStartEditBook}
               onPreviewPublic={handlePreviewBook}
@@ -667,10 +904,20 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
           )}
 
           {/* TAB 3: SERIES */}
-          {currentTab === 'series' && <AdminSeriesView />}
+          {currentTab === 'series' && (
+            <AdminSeriesView
+              initialAction={initialSeriesAction}
+              initialSeries={seriesList}
+              initialBooks={books}
+              onNavigateToNewBook={isAuthor ? handleStartAddNewBook : undefined}
+            />
+          )}
 
           {/* TAB 4: STORIES (Author only) */}
           {currentTab === 'stories' && <AdminStoriesView />}
+
+          {/* TAB: SONGS & MUSIC LIBRARY */}
+          {currentTab === 'songs' && <AdminSongsView />}
 
           {/* TAB 5: NEWS (Author only) */}
           {currentTab === 'news' && <AdminNewsView />}

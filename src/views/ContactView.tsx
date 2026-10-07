@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useSEO } from '../hooks/useSEO';
 import { messageService } from '../services/messageService';
-import { Mail, Send, CheckCircle, BookOpen, MessageSquare, Shield, Sparkles } from 'lucide-react';
+import { siteSettingsService, SiteSettings } from '../services/siteSettingsService';
+import { Mail, Send, CheckCircle, BookOpen, MessageSquare, Shield, Sparkles, MapPin, Phone } from 'lucide-react';
 
 interface ContactViewProps {
   onOpenPrivacy?: () => void;
@@ -9,6 +10,15 @@ interface ContactViewProps {
 
 export const ContactView: React.FC<ContactViewProps> = ({ onOpenPrivacy }) => {
   useSEO('contact');
+
+  const [siteSettings, setSiteSettings] = useState<SiteSettings>(() =>
+    siteSettingsService.getSettings()
+  );
+
+  useEffect(() => {
+    const unsub = siteSettingsService.subscribe(setSiteSettings);
+    return unsub;
+  }, []);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -62,7 +72,36 @@ export const ContactView: React.FC<ContactViewProps> = ({ onOpenPrivacy }) => {
             </h3>
 
             <div className="space-y-3 text-xs text-[#a8a396]">
-              <div>
+              {siteSettings.contactEmail && (
+                <div className="p-2.5 bg-[#171a27] rounded-lg border border-[#2b2e40] space-y-1">
+                  <span className="text-[10px] uppercase font-cinzel text-[#c5a059] font-bold block">
+                    Direct Correspondence Email
+                  </span>
+                  <a
+                    href={`mailto:${siteSettings.contactEmail}`}
+                    className="text-[#f5efeb] hover:text-[#c5a059] font-mono text-xs transition-colors flex items-center gap-1.5"
+                  >
+                    <Mail className="w-3.5 h-3.5 text-[#c5a059] shrink-0" />
+                    <span>{siteSettings.contactEmail}</span>
+                  </a>
+                </div>
+              )}
+
+              {siteSettings.contactAddress && (
+                <div className="flex items-center gap-2 text-xs text-[#8e887a] pt-1">
+                  <MapPin className="w-3.5 h-3.5 text-[#c5a059] shrink-0" />
+                  <span>{siteSettings.contactAddress}</span>
+                </div>
+              )}
+
+              {siteSettings.contactPhone && (
+                <div className="flex items-center gap-2 text-xs text-[#8e887a]">
+                  <Phone className="w-3.5 h-3.5 text-[#c5a059] shrink-0" />
+                  <span className="font-mono">{siteSettings.contactPhone}</span>
+                </div>
+              )}
+
+              <div className="pt-2 border-t border-[#1e202d]">
                 <strong className="text-[#f5efeb] block">Reader Correspondence</strong>
                 <span>Matthew reads every reader message. Feel free to share your thoughts on The Breathwoven Cycle.</span>
               </div>

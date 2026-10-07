@@ -1,7 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { commentService } from '../services/commentService';
-import { BookComment, ReportReason } from '../types';
+import {
+  BookComment,
+  ReportReason,
+  RemovalReason,
+  ThematicTier,
+} from '../types';
 import {
   MessageSquare,
   Send,
@@ -14,12 +19,73 @@ import {
   X,
   User,
   Sparkles,
+  Award,
+  Star,
+  Trash2,
+  Bookmark,
+  ChevronDown,
+  BookOpen,
 } from 'lucide-react';
 
+export const THEMATIC_TIERS: {
+  tier: ThematicTier;
+  shortLabel: string;
+  score: number;
+  badgeClass: string;
+  dotColor: string;
+  description: string;
+}[] = [
+  {
+    tier: 'Unputdownable / Masterpiece',
+    shortLabel: 'Masterpiece',
+    score: 5,
+    badgeClass: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
+    dotColor: '#f59e0b',
+    description: 'Highest acclaim · Could not put it down',
+  },
+  {
+    tier: 'Deeply Captivating / Essential',
+    shortLabel: 'Essential',
+    score: 4,
+    badgeClass: 'bg-purple-500/20 text-purple-300 border-purple-500/40',
+    dotColor: '#a855f7',
+    description: 'Deeply moving lore and unforgettable characters',
+  },
+  {
+    tier: 'Rich & Atmospheric / Recommended',
+    shortLabel: 'Recommended',
+    score: 3,
+    badgeClass: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
+    dotColor: '#10b981',
+    description: 'Woven prose and resonant worldbuilding',
+  },
+  {
+    tier: 'Intriguing / Worth Reading',
+    shortLabel: 'Worth Reading',
+    score: 2,
+    badgeClass: 'bg-sky-500/20 text-sky-300 border-sky-500/40',
+    dotColor: '#38bdf8',
+    description: 'Engaging premise with memorable moments',
+  },
+  {
+    tier: 'Not for Me',
+    shortLabel: 'Not for Me',
+    score: 1,
+    badgeClass: 'bg-stone-500/20 text-stone-300 border-stone-500/40',
+    dotColor: '#a8a29e',
+    description: 'Pacing or style did not align with personal taste',
+  },
+];
+
 interface ReaderCommentsProps {
-  bookId: string;
-  bookTitle: string;
+  bookId?: string;
+  bookTitle?: string;
   bookSlug?: string;
+  storyId?: string;
+  storyTitle?: string;
+  discussionId?: string;
+  discussionTitle?: string;
+  targetType?: 'book' | 'story' | 'discussion';
   onOpenAuthModal?: () => void;
 }
 
@@ -27,6 +93,11 @@ export const ReaderComments: React.FC<ReaderCommentsProps> = ({
   bookId,
   bookTitle,
   bookSlug,
+  storyId,
+  storyTitle,
+  discussionId,
+  discussionTitle,
+  targetType = bookId ? 'book' : storyId ? 'story' : 'discussion',
   onOpenAuthModal,
 }) => {
   const { user, profile, role, isEditor, isAuthor } = useAuth();
@@ -35,6 +106,16 @@ export const ReaderComments: React.FC<ReaderCommentsProps> = ({
   const [commentText, setCommentText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Review & Thematic Tier
+  const isBookContext = targetType === 'book';
+  const [postMode, setPostMode] = useState<'review' | 'comment'>(isBookContext ? 'review' : 'comment');
+  const [selectedTier, setSelectedTier] = useState<ThematicTier>('Unputdownable / Masterpiece');
+  const [hoveredScore, setHoveredScore] = useState<number | null>(null);
+
+  // Administrative instant permanent delete state (Editor & Author)
+  const [permanentlyDeletingComment, setPermanentlyDeletingComment] = useState<BookComment | null>(null);
+  const [isDeletingPermanently, setIsDeletingPermanently] = useState(false);
 
   // Reply state
   const [replyingToId, setReplyingToId] = useState<string | null>(null);
@@ -47,9 +128,24 @@ export const ReaderComments: React.FC<ReaderCommentsProps> = ({
   const [reportDetails, setReportDetails] = useState('');
   const [isReporting, setIsReporting] = useState(false);
 
+  // 7-day holding removal modal state (Editor / Author only)
+  const [removingComment, setRemovingComment] = useState<BookComment | null>(null);
+  const [removalReason, setRemovalReason] = useState<RemovalReason>('Spam');
+  const [removalNotes, setRemovalNotes] = useState('');
+  const [isRemoving, setIsRemoving] = useState(false);
+
+  const displayTitle = bookTitle || storyTitle || discussionTitle || 'this work';
+
   const loadComments = async () => {
     try {
-      const data = await commentService.getCommentsForBook(bookId, role, user?.uid);
+      let data: BookComment[] = [];
+      if (targetType === 'story' && storyId) {
+        data = await commentService.getCommentsForStory(storyId, role, user?.uid);
+      } else if (targetType === 'discussion' && discussionId) {
+        data = await commentService.getCommentsForDiscussion(discussionId, role, user?.uid);
+      } else if (bookId) {
+        data = await commentService.getCommentsForBook(bookId, role, user?.uid);
+      }
       setComments(data);
     } catch (err) {
       console.warn('Failed to load comments:', err);
@@ -60,7 +156,7 @@ export const ReaderComments: React.FC<ReaderCommentsProps> = ({
 
   useEffect(() => {
     loadComments();
-  }, [bookId, role, user?.uid]);
+  }, [bookId, storyId, discussionId, role, user?.uid]);
 
   const handlePostComment = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -71,16 +167,28 @@ export const ReaderComments: React.FC<ReaderCommentsProps> = ({
     if (!commentText.trim()) return;
 
     setIsSubmitting(true);
+    const isReviewSubmission = isBookContext && postMode === 'review';
+    const currentTierObj = THEMATIC_TIERS.find((t) => t.tier === selectedTier);
+    const thematicScore = currentTierObj ? currentTierObj.score : 5;
+
     const res = await commentService.postComment({
       bookId,
       bookTitle,
       bookSlug,
+      storyId,
+      storyTitle,
+      discussionId,
+      discussionTitle,
+      targetType,
       userId: user.uid,
       userName: profile?.displayName || user.displayName || 'Reader',
       userEmail: user.email || '',
       userAvatar: profile?.photoURL || '',
       userRole: role,
       content: commentText.trim(),
+      isReview: isReviewSubmission,
+      thematicTier: isReviewSubmission ? selectedTier : undefined,
+      thematicScore: isReviewSubmission ? thematicScore : undefined,
     });
 
     setIsSubmitting(false);
@@ -90,14 +198,39 @@ export const ReaderComments: React.FC<ReaderCommentsProps> = ({
       const isAutoApproved = role === 'AUTHOR' || role === 'EDITOR';
       setToastMessage(
         isAutoApproved
-          ? 'Comment published!'
-          : 'Thank you for sharing! Your comment was submitted and is pending review.'
+          ? isReviewSubmission
+            ? 'Review published!'
+            : 'Comment published!'
+          : 'Thank you for sharing! Your submission is pending brief review.'
       );
       setTimeout(() => setToastMessage(null), 4000);
     } else {
-      setToastMessage(res.error || 'Failed to post comment.');
+      setToastMessage(res.error || 'Failed to submit.');
       setTimeout(() => setToastMessage(null), 4000);
     }
+  };
+
+  const handlePermanentDeleteSubmit = async () => {
+    if (!permanentlyDeletingComment || !user) return;
+    setIsDeletingPermanently(true);
+
+    const res = await commentService.permanentlyDeleteComment({
+      commentId: permanentlyDeletingComment.id,
+      authorName: profile?.displayName || user.displayName || 'Moderator',
+      authorEmail: user.email || '',
+      authorId: user.uid,
+    });
+
+    setIsDeletingPermanently(false);
+    setPermanentlyDeletingComment(null);
+
+    if (res.success) {
+      setToastMessage('Comment permanently purged.');
+      await loadComments();
+    } else {
+      setToastMessage('Could not permanently delete comment.');
+    }
+    setTimeout(() => setToastMessage(null), 4000);
   };
 
   const handlePostReply = async (parentId: string) => {
@@ -112,6 +245,11 @@ export const ReaderComments: React.FC<ReaderCommentsProps> = ({
       bookId,
       bookTitle,
       bookSlug,
+      storyId,
+      storyTitle,
+      discussionId,
+      discussionTitle,
+      targetType,
       userId: user.uid,
       userName: profile?.displayName || user.displayName || 'Reader',
       userEmail: user.email || '',
@@ -145,6 +283,8 @@ export const ReaderComments: React.FC<ReaderCommentsProps> = ({
       commentId: reportingComment.id,
       bookId,
       bookTitle,
+      storyId,
+      discussionId,
       reporterUserId: user.uid,
       reporterEmail: user.email || '',
       reason: reportReason,
@@ -164,6 +304,34 @@ export const ReaderComments: React.FC<ReaderCommentsProps> = ({
     setTimeout(() => setToastMessage(null), 4000);
   };
 
+  // 7-day holding removal
+  const handleRemoveSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!removingComment || !user) return;
+
+    setIsRemoving(true);
+    const res = await commentService.removeCommentWithHolding({
+      commentId: removingComment.id,
+      moderatorName: profile?.displayName || user.displayName || 'Moderator',
+      reason: removalReason,
+      notes: removalNotes,
+      moderatorEmail: user.email || '',
+      moderatorId: user.uid,
+    });
+
+    setIsRemoving(false);
+    setRemovingComment(null);
+    setRemovalNotes('');
+
+    if (res.success) {
+      setToastMessage('Comment removed and moved to 7-day holding period.');
+      await loadComments();
+    } else {
+      setToastMessage('Could not remove comment.');
+    }
+    setTimeout(() => setToastMessage(null), 4000);
+  };
+
   // Group top-level comments and replies
   const topLevelComments = comments.filter((c) => !c.parentId);
   const repliesByParentId = comments.reduce<Record<string, BookComment[]>>((acc, c) => {
@@ -173,6 +341,27 @@ export const ReaderComments: React.FC<ReaderCommentsProps> = ({
     }
     return acc;
   }, {});
+
+  // Thematic tier breakdown stats for books
+  const reviewsWithTier = topLevelComments.filter((c) => c.thematicTier);
+  const tierCounts: Record<ThematicTier, number> = {
+    'Unputdownable / Masterpiece': 0,
+    'Deeply Captivating / Essential': 0,
+    'Rich & Atmospheric / Recommended': 0,
+    'Intriguing / Worth Reading': 0,
+    'Not for Me': 0,
+  };
+  reviewsWithTier.forEach((r) => {
+    if (r.thematicTier && tierCounts[r.thematicTier] !== undefined) {
+      tierCounts[r.thematicTier]++;
+    }
+  });
+
+  const totalTomeScore = reviewsWithTier.reduce((sum, r) => {
+    const s = r.thematicScore || (THEMATIC_TIERS.find((t) => t.tier === r.thematicTier)?.score || 5);
+    return sum + s;
+  }, 0);
+  const avgTomeScore = reviewsWithTier.length > 0 ? (totalTomeScore / reviewsWithTier.length).toFixed(1) : '5.0';
 
   const formatDate = (isoString: string) => {
     try {
@@ -194,17 +383,19 @@ export const ReaderComments: React.FC<ReaderCommentsProps> = ({
         <div>
           <div className="flex items-center gap-2">
             <span className="text-xs uppercase font-cinzel tracking-widest text-[#c5a059] font-semibold">
-              Reader Discussion
+              {isBookContext ? 'Reader Reviews & Discussion' : 'Reader Community Discussion'}
             </span>
             <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-[#1c1e2d] text-[#c5a059] border border-[#c5a059]/30">
-              {topLevelComments.length} {topLevelComments.length === 1 ? 'Thought' : 'Thoughts'}
+              {topLevelComments.length} {topLevelComments.length === 1 ? 'Contribution' : 'Contributions'}
             </span>
           </div>
           <h3 className="text-2xl font-cinzel font-bold text-[#f5efeb] mt-1">
-            Join the Conversation
+            {isBookContext ? `Reviews & Thoughts on ${displayTitle}` : `Discussion on ${displayTitle}`}
           </h3>
           <p className="text-xs sm:text-sm text-[#9e978b] mt-1 font-cormorant italic text-base">
-            Share your thoughts, theories, and impressions on {bookTitle}.
+            {isBookContext
+              ? 'Share your written review with a thematic rating tier, or converse with fellow readers.'
+              : 'Join the conversation, explore lore theories, and engage with the community.'}
           </p>
         </div>
 
@@ -230,6 +421,68 @@ export const ReaderComments: React.FC<ReaderCommentsProps> = ({
         </div>
       </div>
 
+      {/* Thematic Tier Summary breakdown on Books */}
+      {isBookContext && reviewsWithTier.length > 0 && (
+        <div className="bg-[#131522] border border-[#272a3e] rounded-xl p-5 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#1e2030] pb-2">
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-cinzel font-bold text-[#f5efeb] uppercase tracking-wider flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-[#c5a059]" />
+                <span>Reader Reception ({reviewsWithTier.length} Evaluated)</span>
+              </span>
+              <div className="flex items-center gap-1 text-[#c5a059]">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <BookOpen
+                    key={i}
+                    className={`w-3.5 h-3.5 ${
+                      i < Math.round(Number(avgTomeScore))
+                        ? 'fill-current text-[#c5a059]'
+                        : 'text-stone-600'
+                    }`}
+                  />
+                ))}
+                <span className="text-xs font-mono font-bold text-[#f5efeb] ml-1">
+                  {avgTomeScore} / 5.0 Tomes
+                </span>
+              </div>
+            </div>
+            <span className="text-[11px] text-[#8e887a]">
+              Thematic Alternative Rating System
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 pt-1">
+            {THEMATIC_TIERS.map((t) => {
+              const count = tierCounts[t.tier];
+              const pct = Math.round((count / reviewsWithTier.length) * 100) || 0;
+              return (
+                <div
+                  key={t.tier}
+                  className="bg-[#10121d] border border-[#212436] rounded-lg p-2.5 flex flex-col justify-between"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-cinzel font-bold text-[#d6d0c4] truncate flex items-center gap-1" title={t.tier}>
+                      <span className="text-[#c5a059] font-mono">{t.score}T</span>
+                      <span>{t.shortLabel}</span>
+                    </span>
+                    <span className="text-[10px] font-mono text-[#c5a059] font-bold">
+                      {count} ({pct}%)
+                    </span>
+                  </div>
+                  {/* Progress bar */}
+                  <div className="w-full bg-[#181a28] h-1.5 rounded-full overflow-hidden mt-2">
+                    <div
+                      className="h-full rounded-full transition-all"
+                      style={{ width: `${pct}%`, backgroundColor: t.dotColor }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Toast Notification */}
       {toastMessage && (
         <div className="p-3 bg-[#19221b] border border-emerald-500/40 text-emerald-300 text-xs rounded-lg flex items-center justify-between animate-in fade-in">
@@ -243,16 +496,138 @@ export const ReaderComments: React.FC<ReaderCommentsProps> = ({
         </div>
       )}
 
-      {/* Main Comment Box */}
-      <form onSubmit={handlePostComment} className="space-y-3">
+      {/* Main Comment / Review Form */}
+      <form onSubmit={handlePostComment} className="space-y-4">
+        {/* If Book context: Mode switcher (Review vs Discussion comment) */}
+        {isBookContext && (
+          <div className="flex items-center gap-2 border-b border-[#212334] pb-2">
+            <button
+              type="button"
+              onClick={() => setPostMode('review')}
+              className={`px-3 py-1.5 text-xs font-cinzel rounded-md transition-colors cursor-pointer flex items-center gap-1.5 ${
+                postMode === 'review'
+                  ? 'bg-[#c5a059] text-[#0c0d12] font-bold'
+                  : 'text-[#9e978a] hover:bg-[#181a28]'
+              }`}
+            >
+              <Award className="w-3.5 h-3.5" />
+              <span>Leave a Review with Thematic Tier</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setPostMode('comment')}
+              className={`px-3 py-1.5 text-xs font-cinzel rounded-md transition-colors cursor-pointer flex items-center gap-1.5 ${
+                postMode === 'comment'
+                  ? 'bg-[#c5a059] text-[#0c0d12] font-bold'
+                  : 'text-[#9e978a] hover:bg-[#181a28]'
+              }`}
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              <span>Discussion Comment</span>
+            </button>
+          </div>
+        )}
+
+        {/* Thematic Tier Selector (Non-Star Rating) */}
+        {isBookContext && postMode === 'review' && (
+          <div className="bg-[#141624] border border-[#2b2e42] rounded-xl p-4 sm:p-5 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#222538] pb-3">
+              <div>
+                <label className="text-xs font-cinzel font-bold text-[#c5a059] block uppercase tracking-wider">
+                  Thematic Rating & Tome Scale
+                </label>
+                <p className="text-[11px] text-[#8e887a] mt-0.5">
+                  Alternative non-star rating indicator: select by Tome count or descriptive tier
+                </p>
+              </div>
+
+              {/* Interactive 5-Tome Scale */}
+              <div className="flex items-center gap-1.5 bg-[#0f111c] border border-[#242738] px-3 py-1.5 rounded-lg self-start sm:self-auto">
+                <span className="text-[10px] font-cinzel text-[#8e887a] uppercase mr-1">Tomes:</span>
+                {[1, 2, 3, 4, 5].map((score) => {
+                  const currentTierObj = THEMATIC_TIERS.find((t) => t.tier === selectedTier);
+                  const activeScore = currentTierObj ? currentTierObj.score : 5;
+                  const isFilled = (hoveredScore !== null ? hoveredScore : activeScore) >= score;
+                  return (
+                    <button
+                      key={score}
+                      type="button"
+                      onMouseEnter={() => setHoveredScore(score)}
+                      onMouseLeave={() => setHoveredScore(null)}
+                      onClick={() => {
+                        const targetTier = THEMATIC_TIERS.find((t) => t.score === score);
+                        if (targetTier) setSelectedTier(targetTier.tier);
+                      }}
+                      className="p-1 text-[#c5a059] hover:scale-125 transition-transform cursor-pointer"
+                      title={`${score} Tomes: ${THEMATIC_TIERS.find((t) => t.score === score)?.shortLabel}`}
+                    >
+                      <BookOpen
+                        className={`w-4 h-4 transition-all ${
+                          isFilled
+                            ? 'fill-current text-[#c5a059] drop-shadow-[0_0_6px_rgba(197,160,89,0.5)]'
+                            : 'text-stone-600'
+                        }`}
+                      />
+                    </button>
+                  );
+                })}
+                <span className="text-xs font-mono font-bold text-[#c5a059] ml-1.5">
+                  {hoveredScore !== null
+                    ? `${hoveredScore}/5`
+                    : `${THEMATIC_TIERS.find((t) => t.tier === selectedTier)?.score || 5}/5`}
+                </span>
+              </div>
+            </div>
+
+            {/* Descriptive Tier Selector */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+              {THEMATIC_TIERS.map((t) => {
+                const isSelected = selectedTier === t.tier;
+                return (
+                  <button
+                    key={t.tier}
+                    type="button"
+                    onClick={() => setSelectedTier(t.tier)}
+                    className={`p-2.5 rounded-lg border text-left transition-all cursor-pointer flex items-start gap-2.5 ${
+                      isSelected
+                        ? 'bg-[#1b1e30] border-[#c5a059] shadow-md shadow-[#c5a059]/10'
+                        : 'bg-[#11131c] border-[#252839] hover:border-[#383c54]'
+                    }`}
+                  >
+                    <div className="flex flex-col items-center gap-0.5 shrink-0 pt-0.5">
+                      <div
+                        className="w-2.5 h-2.5 rounded-full"
+                        style={{ backgroundColor: t.dotColor }}
+                      />
+                      <span className="text-[9px] font-mono text-[#c5a059] font-bold">
+                        {t.score}T
+                      </span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-cinzel font-bold text-[#f5efeb] truncate">
+                        {t.tier}
+                      </div>
+                      <div className="text-[10px] text-[#8e887a] line-clamp-1">
+                        {t.description}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         <div className="relative">
           <textarea
             value={commentText}
             onChange={(e) => setCommentText(e.target.value)}
             placeholder={
               user
-                ? "Share your thoughts about this book..."
-                : "Sign in as a Reader to share your thoughts about this book..."
+                ? isBookContext && postMode === 'review'
+                  ? `Write your review of ${displayTitle}... What stood out about the prose, themes, or craft?`
+                  : `Share your thoughts about ${displayTitle}...`
+                : `Sign in as a Reader to share your thoughts on ${displayTitle}...`
             }
             rows={4}
             disabled={!user}
@@ -264,9 +639,9 @@ export const ReaderComments: React.FC<ReaderCommentsProps> = ({
           <p className="text-[11px] text-[#787367]">
             {user
               ? role === 'AUTHOR' || role === 'EDITOR'
-                ? "Moderator post will be published immediately."
-                : "New reader comments are held briefly for moderation."
-              : "Registered readers can post, reply, and report comments."}
+                ? 'Moderator post will be published immediately.'
+                : 'Reader contributions are held briefly for moderation.'
+              : 'Registered readers can post reviews, reply to threads, and report inappropriate content.'}
           </p>
 
           <div className="flex items-center gap-3">
@@ -276,7 +651,7 @@ export const ReaderComments: React.FC<ReaderCommentsProps> = ({
                 onClick={onOpenAuthModal}
                 className="px-5 py-2.5 bg-[#1a1d2c] hover:bg-[#25283c] border border-[#373a50] text-[#c5a059] text-xs font-cinzel font-semibold tracking-wider uppercase rounded-lg transition-colors cursor-pointer"
               >
-                Sign In to Comment
+                Sign In to Post
               </button>
             ) : (
               <button
@@ -285,25 +660,31 @@ export const ReaderComments: React.FC<ReaderCommentsProps> = ({
                 className="px-6 py-2.5 bg-[#c5a059] hover:bg-[#d6b066] text-[#0c0d12] text-xs font-cinzel font-bold tracking-wider uppercase rounded-lg transition-all shadow-md shadow-[#c5a059]/10 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 cursor-pointer"
               >
                 <Send className="w-3.5 h-3.5" />
-                <span>{isSubmitting ? 'Posting...' : 'Post Comment'}</span>
+                <span>
+                  {isSubmitting
+                    ? 'Publishing...'
+                    : isBookContext && postMode === 'review'
+                    ? 'Submit Review'
+                    : 'Post Comment'}
+                </span>
               </button>
             )}
           </div>
         </div>
       </form>
 
-      {/* Comments List */}
+      {/* Contributions List */}
       <div className="space-y-6 pt-4">
         {loading ? (
           <div className="text-center py-10 text-xs font-cinzel text-[#8f897c]">
-            Loading discussion threads...
+            Loading reader thoughts & reviews...
           </div>
         ) : topLevelComments.length === 0 ? (
           <div className="text-center py-12 border border-dashed border-[#232635] rounded-xl p-6 text-sm text-[#8f897c] space-y-2">
             <MessageSquare className="w-8 h-8 text-[#5c574c] mx-auto" />
-            <p className="font-cinzel text-[#dcd7cb]">No comments yet on this edition.</p>
+            <p className="font-cinzel text-[#dcd7cb]">No reviews or comments yet.</p>
             <p className="text-xs text-[#7d776b]">
-              Be the first reader to start the discussion for {bookTitle}!
+              Be the first reader to share your impression on {displayTitle}!
             </p>
           </div>
         ) : (
@@ -311,6 +692,9 @@ export const ReaderComments: React.FC<ReaderCommentsProps> = ({
             const replies = repliesByParentId[comment.id] || [];
             const isAuthorComment = comment.userRole === 'AUTHOR';
             const isEditorComment = comment.userRole === 'EDITOR';
+            const tierMeta = comment.thematicTier
+              ? THEMATIC_TIERS.find((t) => t.tier === comment.thematicTier)
+              : null;
 
             return (
               <div
@@ -321,7 +705,7 @@ export const ReaderComments: React.FC<ReaderCommentsProps> = ({
                     : 'bg-[#12141e] border-[#222536]'
                 }`}
               >
-                {/* Comment Header */}
+                {/* Header */}
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3">
                     <div
@@ -360,6 +744,39 @@ export const ReaderComments: React.FC<ReaderCommentsProps> = ({
                             Editor
                           </span>
                         )}
+
+                        {/* Thematic Tier & Tome Rating Badge if review */}
+                        {tierMeta && (
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {/* Tome Rating Scale Indicator */}
+                            <div
+                              className="flex items-center gap-0.5 text-[#c5a059]"
+                              title={`${comment.thematicScore || tierMeta.score} of 5 Tomes`}
+                            >
+                              {Array.from({ length: 5 }).map((_, i) => (
+                                <BookOpen
+                                  key={i}
+                                  className={`w-3.5 h-3.5 ${
+                                    i < (comment.thematicScore || tierMeta.score)
+                                      ? 'fill-current text-[#c5a059]'
+                                      : 'text-stone-700'
+                                  }`}
+                                />
+                              ))}
+                            </div>
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-cinzel font-semibold uppercase border flex items-center gap-1.5 ${tierMeta.badgeClass}`}
+                            >
+                              <span
+                                className="w-1.5 h-1.5 rounded-full"
+                                style={{ backgroundColor: tierMeta.dotColor }}
+                              />
+                              <span>
+                                {comment.thematicScore || tierMeta.score}/5 · {tierMeta.tier}
+                              </span>
+                            </span>
+                          </div>
+                        )}
                       </div>
                       <span className="text-[11px] text-[#7d786d]">
                         {formatDate(comment.createdAt)}
@@ -367,12 +784,12 @@ export const ReaderComments: React.FC<ReaderCommentsProps> = ({
                     </div>
                   </div>
 
-                  {/* Moderation / State Tag */}
+                  {/* Moderation / State Tag & Actions */}
                   <div className="flex items-center gap-2">
                     {comment.status === 'PENDING' && (
                       <span className="px-2 py-0.5 rounded text-[10px] font-cinzel bg-amber-500/10 text-amber-300 border border-amber-500/30 flex items-center gap-1">
                         <Clock className="w-3 h-3" />
-                        Pending Moderation
+                        Pending Review
                       </span>
                     )}
                     {comment.status === 'FLAGGED' && (
@@ -391,6 +808,28 @@ export const ReaderComments: React.FC<ReaderCommentsProps> = ({
                       >
                         <Flag className="w-3.5 h-3.5" />
                       </button>
+                    )}
+
+                    {/* Editor / Author Actions: 7-Day Holding or Direct Admin Delete */}
+                    {(isEditor || isAuthor) && (
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => setRemovingComment(comment)}
+                          title="Move to 7-day holding workflow"
+                          className="text-[#8f897c] hover:text-amber-400 p-1 rounded transition-colors cursor-pointer flex items-center gap-1 text-[11px] font-cinzel"
+                        >
+                          <Clock className="w-3 h-3" />
+                          <span className="hidden sm:inline">Hold</span>
+                        </button>
+                        <button
+                          onClick={() => setPermanentlyDeletingComment(comment)}
+                          title="Administrative Delete: Permanently delete comment immediately"
+                          className="text-[#8f897c] hover:text-rose-400 p-1 rounded transition-colors cursor-pointer flex items-center gap-1 text-[11px] font-cinzel"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          <span className="hidden sm:inline">Delete</span>
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -481,15 +920,35 @@ export const ReaderComments: React.FC<ReaderCommentsProps> = ({
                               </span>
                             </div>
 
-                            {user && user.uid !== reply.userId && (
-                              <button
-                                onClick={() => setReportingComment(reply)}
-                                className="text-[#696459] hover:text-rose-400 p-0.5"
-                                title="Report comment"
-                              >
-                                <Flag className="w-3 h-3" />
-                              </button>
-                            )}
+                            <div className="flex items-center gap-2">
+                              {user && user.uid !== reply.userId && (
+                                <button
+                                  onClick={() => setReportingComment(reply)}
+                                  className="text-[#696459] hover:text-rose-400 p-0.5"
+                                  title="Report comment"
+                                >
+                                  <Flag className="w-3 h-3" />
+                                </button>
+                              )}
+                              {(isEditor || isAuthor) && (
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    onClick={() => setRemovingComment(reply)}
+                                    className="text-[#696459] hover:text-amber-400 p-0.5"
+                                    title="Hold comment (7 days)"
+                                  >
+                                    <Clock className="w-3 h-3" />
+                                  </button>
+                                  <button
+                                    onClick={() => setPermanentlyDeletingComment(reply)}
+                                    className="text-[#696459] hover:text-rose-400 p-0.5"
+                                    title="Delete comment immediately"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
                           </div>
                           <p className="mt-1.5 text-[#ccc7bd] leading-relaxed whitespace-pre-wrap">
                             {reply.content}
@@ -505,6 +964,89 @@ export const ReaderComments: React.FC<ReaderCommentsProps> = ({
         )}
       </div>
 
+      {/* 7-Day Holding Removal Modal (Editor / Author only) */}
+      {removingComment && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="relative w-full max-w-md bg-[#11131c] border border-rose-500/40 rounded-2xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-[#212334] pb-3">
+              <div className="flex items-center gap-2 text-rose-400 font-cinzel font-bold text-sm">
+                <Trash2 className="w-4 h-4" />
+                <span>Remove Comment (7-Day Holding Period)</span>
+              </div>
+              <button
+                onClick={() => setRemovingComment(null)}
+                className="text-[#807b70] hover:text-white p-1"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-[#a8a396]">
+              Per policy, removed comments are placed in a <strong>7-Day Holding Period</strong> (hidden from all Readers). Editors and Authors can review or restore it anytime during the 7 days before permanent deletion.
+            </p>
+
+            <blockquote className="text-xs italic bg-[#171926] p-3 rounded border-l-2 border-rose-500 text-[#c9c4b7]">
+              "{removingComment.content.length > 120 ? removingComment.content.slice(0, 120) + '...' : removingComment.content}"
+            </blockquote>
+
+            <form onSubmit={handleRemoveSubmit} className="space-y-4">
+              <div>
+                <label className="text-xs font-cinzel text-[#dcd7cb] block mb-1">
+                  Removal Reason (Required)
+                </label>
+                <select
+                  value={removalReason}
+                  onChange={(e) => setRemovalReason(e.target.value as RemovalReason)}
+                  className="w-full bg-[#161825] border border-[#2e3146] rounded-lg px-3 py-2 text-xs text-[#e8e2d9] focus:outline-none focus:border-[#c5a059]"
+                >
+                  <option value="Spam">Spam / Unsolicited Advertising</option>
+                  <option value="Harassment">Bullying / Harassment</option>
+                  <option value="Hate Speech">Hate Speech</option>
+                  <option value="Off-Topic">Off-Topic / Disruptive</option>
+                  <option value="Inappropriate content">Inappropriate / Obscene</option>
+                  <option value="Spoiler">Unmarked Major Spoilers</option>
+                  <option value="Other">Other Infraction</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-cinzel text-[#dcd7cb] block mb-1">
+                  Moderator Notes (Optional)
+                </label>
+                <textarea
+                  value={removalNotes}
+                  onChange={(e) => setRemovalNotes(e.target.value)}
+                  placeholder="Internal audit notes..."
+                  rows={2}
+                  className="w-full bg-[#161825] border border-[#2e3146] rounded-lg p-3 text-xs text-[#e8e2d9] focus:outline-none focus:border-[#c5a059] resize-none"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setRemovingComment(null)}
+                  className="px-4 py-2 text-xs font-cinzel text-[#8f897c] hover:text-white"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isRemoving}
+                  className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-cinzel font-semibold tracking-wider uppercase rounded-lg transition-colors disabled:opacity-50"
+                >
+                  {isRemoving ? 'Removing...' : 'Confirm 7-Day Removal'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Report Modal */}
       {reportingComment && (
         <div
@@ -516,7 +1058,7 @@ export const ReaderComments: React.FC<ReaderCommentsProps> = ({
             <div className="flex items-center justify-between border-b border-[#212334] pb-3">
               <div className="flex items-center gap-2 text-rose-400 font-cinzel font-bold text-sm">
                 <Flag className="w-4 h-4" />
-                <span>Report Inappropriate Comment</span>
+                <span>Report Inappropriate Content</span>
               </div>
               <button
                 onClick={() => setReportingComment(null)}
@@ -527,7 +1069,7 @@ export const ReaderComments: React.FC<ReaderCommentsProps> = ({
             </div>
 
             <p className="text-xs text-[#a8a396]">
-              Help our editors keep the reading community respectful and constructive.
+              Help our editorial team keep the community respectful, welcoming, and spam-free.
             </p>
 
             <blockquote className="text-xs italic bg-[#171926] p-3 rounded border-l-2 border-[#c5a059] text-[#c9c4b7]">
@@ -548,7 +1090,7 @@ export const ReaderComments: React.FC<ReaderCommentsProps> = ({
                   <option value="Harassment">Harassment or Abuse</option>
                   <option value="Offensive content">Offensive or Hate Speech</option>
                   <option value="Spoiler">Unmarked Major Spoiler</option>
-                  <option value="Inappropriate content">Inappropriate / Off-Topic Content</option>
+                  <option value="Inappropriate content">Inappropriate / Off-Topic</option>
                   <option value="Other">Other Violation</option>
                 </select>
               </div>
@@ -583,6 +1125,58 @@ export const ReaderComments: React.FC<ReaderCommentsProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Immediate Permanent Deletion Modal (Editor & Author Administrative Action) */}
+      {permanentlyDeletingComment && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-in fade-in"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="relative w-full max-w-md bg-[#11131c] border border-rose-500/40 rounded-2xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-[#212334] pb-3">
+              <div className="flex items-center gap-2 text-rose-400 font-cinzel font-bold text-sm">
+                <Trash2 className="w-4 h-4" />
+                <span>Administrative Delete</span>
+              </div>
+              <button
+                onClick={() => setPermanentlyDeletingComment(null)}
+                className="text-[#807b70] hover:text-white p-1"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-[#a8a396] leading-relaxed">
+              As an Editor or Author, you have administrative delete privileges. Are you sure you want to permanently delete this comment immediately? This cannot be undone.
+            </p>
+
+            <blockquote className="text-xs italic bg-[#171926] p-3 rounded border-l-2 border-rose-500 text-[#c9c4b7]">
+              "{permanentlyDeletingComment.content.length > 120
+                ? permanentlyDeletingComment.content.slice(0, 120) + '...'
+                : permanentlyDeletingComment.content}"
+            </blockquote>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setPermanentlyDeletingComment(null)}
+                className="px-4 py-2 text-xs font-cinzel text-[#8f897c] hover:text-white"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingPermanently}
+                onClick={handlePermanentDeleteSubmit}
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-cinzel font-bold uppercase rounded-lg transition-colors disabled:opacity-50"
+              >
+                {isDeletingPermanently ? 'Deleting...' : 'Delete Permanently'}
+              </button>
+            </div>
           </div>
         </div>
       )}

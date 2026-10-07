@@ -15,6 +15,7 @@ import {
   Globe,
   Users,
   ShieldAlert,
+  Search,
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -22,6 +23,7 @@ interface NavbarProps {
   setActiveTab: (tab: string) => void;
   onJoinJourneyClick: () => void;
   onOpenAdmin: () => void;
+  onOpenSearch?: () => void;
   isAdmin?: boolean;
 }
 
@@ -30,8 +32,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   setActiveTab,
   onJoinJourneyClick,
   onOpenAdmin,
+  onOpenSearch,
 }) => {
-  const { user, profile, role, isAuthor, isEditor, isReader, signOut } = useAuth();
+  const { user, profile, role, isAuthor, isEditor, canEditSite, signOut } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
 
@@ -40,7 +43,9 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: 'books', label: 'Books' },
     { id: 'breathwoven-cycle', label: 'The Breathwoven Cycle' },
     { id: 'abyssal', label: 'The Abyssal Current' },
-    { id: 'stories', label: 'Stories' },
+    { id: 'stories', label: 'Short Stories' },
+    { id: 'discussions', label: 'Discussions' },
+    { id: 'audio-hub', label: 'Audio Vault' },
     { id: 'craft', label: 'Gallery' },
     { id: 'about', label: 'About' },
     { id: 'news', label: 'Dispatches' },
@@ -66,32 +71,33 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   return (
     <header className="sticky top-0 z-40 w-full bg-[#0c0d13]/90 backdrop-blur-md border-b border-[#232635]/80 transition-colors">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
-        {/* Zone 1: Single text element wordmark */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between gap-4">
+        {/* Zone 1: Single text element wordmark - Strictly on one line */}
         <button
           onClick={() => handleNavClick('home')}
-          className="text-left group cursor-pointer"
+          className="text-left group cursor-pointer shrink-0 whitespace-nowrap"
+          aria-label="Matthew E. Messmer - Home"
         >
-          <span className="text-xl sm:text-2xl font-cinzel font-bold tracking-wider text-[#f5efeb] group-hover:text-[#c5a059] transition-colors">
-            Matthew E. Messmer
+          <span className="text-lg sm:text-xl lg:text-2xl font-cinzel font-bold tracking-wider text-[#f5efeb] group-hover:text-[#c5a059] transition-colors whitespace-nowrap inline-block">
+            Matthew&nbsp;E.&nbsp;Messmer
           </span>
         </button>
 
-        {/* Zone 2: clean text navigation links */}
-        <nav className="hidden xl:flex items-center gap-5 text-xs xl:text-sm font-medium text-[#b5af9f]">
+        {/* Zone 2: clean text navigation links - Responsive single line without awkward wrapping */}
+        <nav className="hidden 2xl:flex items-center gap-3 3xl:gap-4 text-[13px] font-medium text-[#b5af9f] shrink-0 whitespace-nowrap">
           {navLinks.map((link) => {
             const isActive = activeTab === link.id;
             return (
               <button
                 key={link.id}
                 onClick={() => handleNavClick(link.id)}
-                className={`transition-colors py-1 cursor-pointer whitespace-nowrap relative ${
+                className={`transition-colors py-1 cursor-pointer whitespace-nowrap relative shrink-0 ${
                   isActive
                     ? 'text-[#f5efeb] font-semibold'
                     : 'hover:text-[#f5efeb]'
                 }`}
               >
-                {link.label}
+                <span>{link.label}</span>
                 {isActive && (
                   <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#c5a059] rounded-full" />
                 )}
@@ -101,7 +107,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         </nav>
 
         {/* Zone 3: primary actions */}
-        <div className="hidden sm:flex items-center gap-3">
+        <div className="hidden sm:flex items-center gap-3 shrink-0">
           {/* User Account / Sign In Dropdown */}
           {user ? (
             <div className="relative">
@@ -208,20 +214,31 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           )}
 
-          {/* Admin / Portal Trigger for quick access */}
-          <button
-            onClick={onOpenAdmin}
-            title={isEditor ? "Staff / Author Portal" : "Sign In to Author Portal / Edit Site"}
-            className={`px-3 py-1.5 text-xs font-cinzel rounded-lg border transition-all cursor-pointer flex items-center gap-1.5 ${
-              isEditor
-                ? 'bg-[#141e17] border-emerald-600/50 text-emerald-300 hover:border-emerald-400'
-                : 'text-[#9e978a] hover:text-[#f5efeb] bg-[#12141e] hover:bg-[#1a1d2b] border-[#292c3f]'
-            }`}
-            aria-label={isEditor ? "Admin Dashboard" : "Sign In to Edit Site"}
-          >
-            <Shield className={`w-3.5 h-3.5 ${isEditor ? 'text-emerald-400' : 'text-[#c5a059]'}`} />
-            <span>{isAuthor ? 'Author Portal' : isEditor ? 'Editor Portal' : 'Edit Site'}</span>
-          </button>
+          {/* Global Search Button */}
+          {onOpenSearch && (
+            <button
+              onClick={onOpenSearch}
+              className="p-2 text-[#9e978a] hover:text-[#c5a059] bg-[#12141e] hover:bg-[#1a1d2b] border border-[#292c3f] rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 text-xs font-cinzel"
+              title="Search series, books, stories (Ctrl+K)"
+              aria-label="Global Search"
+            >
+              <Search className="w-3.5 h-3.5 text-[#c5a059]" />
+              <span className="hidden md:inline text-[11px]">Search</span>
+            </button>
+          )}
+
+          {/* Edit Site link - ONLY rendered for authorized users (Author or authorized Editor) */}
+          {canEditSite && (
+            <button
+              onClick={onOpenAdmin}
+              title={isAuthor ? "Author Portal & Site Content Management" : "Editor Portal"}
+              className="px-3 py-1.5 text-xs font-cinzel rounded-lg border transition-all cursor-pointer flex items-center gap-1.5 bg-[#141e17] border-emerald-600/50 text-emerald-300 hover:border-emerald-400"
+              aria-label={isAuthor ? "Edit Site" : "Editor Portal"}
+            >
+              <Shield className="w-3.5 h-3.5 text-emerald-400" />
+              <span>{isAuthor ? 'Edit Site' : 'Editor Portal'}</span>
+            </button>
+          )}
 
           {/* Join Journey CTA */}
           <button
@@ -234,16 +251,28 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
 
         {/* Mobile menu trigger */}
-        <div className="flex items-center gap-2 xl:hidden">
-          <button
-            onClick={onOpenAdmin}
-            title="Author Admin"
-            className="px-2 py-1.5 text-[#9e978a] hover:text-[#c5a059] flex items-center gap-1 text-xs border border-[#2b2e40] rounded-md bg-[#12141e]"
-            aria-label="Admin"
-          >
-            <Shield className="w-3.5 h-3.5 text-[#c5a059]" />
-            <span className="font-cinzel text-[11px]">{isAuthor ? 'Author' : isEditor ? 'Editor' : 'Edit'}</span>
-          </button>
+        <div className="flex items-center gap-2 2xl:hidden shrink-0">
+          {onOpenSearch && (
+            <button
+              onClick={onOpenSearch}
+              title="Search Canon"
+              className="p-1.5 text-[#9e978a] hover:text-[#c5a059] border border-[#2b2e40] rounded-md bg-[#12141e]"
+              aria-label="Search"
+            >
+              <Search className="w-4 h-4 text-[#c5a059]" />
+            </button>
+          )}
+          {canEditSite && (
+            <button
+              onClick={onOpenAdmin}
+              title={isAuthor ? "Author Portal" : "Editor Portal"}
+              className="px-2 py-1.5 text-[#9e978a] hover:text-[#c5a059] flex items-center gap-1 text-xs border border-[#2b2e40] rounded-md bg-[#12141e]"
+              aria-label="Edit Site"
+            >
+              <Shield className="w-3.5 h-3.5 text-[#c5a059]" />
+              <span className="font-cinzel text-[11px]">{isAuthor ? 'Edit Site' : 'Editor'}</span>
+            </button>
+          )}
           <button
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
             className="p-2 text-[#b5af9f] hover:text-[#f5efeb] rounded-md"
@@ -256,7 +285,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
       {/* Mobile Drawer */}
       {mobileMenuOpen && (
-        <div className="xl:hidden bg-[#0e1017] border-b border-[#232635] px-4 pt-3 pb-6 space-y-2">
+        <div className="2xl:hidden bg-[#0e1017] border-b border-[#232635] px-4 pt-3 pb-6 space-y-2">
           {user && (
             <div className="px-3 py-2 bg-[#151724] border border-[#232636] rounded-lg mb-3 flex items-center justify-between">
               <div>
@@ -314,19 +343,21 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
-            <button
-              onClick={() => {
-                setMobileMenuOpen(false);
-                onOpenAdmin();
-              }}
-              className="w-full py-2.5 px-3 text-left text-xs font-cinzel tracking-wider uppercase font-semibold text-[#f5efeb] bg-[#161822] hover:bg-[#1d202e] border border-[#2b2e40] rounded-md transition-colors flex items-center justify-between"
-            >
-              <span className="flex items-center gap-2">
-                <Shield className="w-4 h-4 text-[#c5a059]" />
-                <span>{isAuthor ? 'Author Dashboard' : isEditor ? 'Editor Dashboard' : 'Sign In to Edit Site'}</span>
-              </span>
-              {isEditor && <span className="text-[10px] text-emerald-400 font-sans">{role}</span>}
-            </button>
+            {canEditSite && (
+              <button
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  onOpenAdmin();
+                }}
+                className="w-full py-2.5 px-3 text-left text-xs font-cinzel tracking-wider uppercase font-semibold text-[#f5efeb] bg-[#161822] hover:bg-[#1d202e] border border-[#2b2e40] rounded-md transition-colors flex items-center justify-between"
+              >
+                <span className="flex items-center gap-2">
+                  <Shield className="w-4 h-4 text-[#c5a059]" />
+                  <span>{isAuthor ? 'Edit Site' : 'Editor Dashboard'}</span>
+                </span>
+                <span className="text-[10px] text-emerald-400 font-sans">{role}</span>
+              </button>
+            )}
 
             <button
               onClick={() => {

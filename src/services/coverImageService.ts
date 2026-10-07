@@ -1,57 +1,65 @@
+/**
+ * Cover Image Service
+ * 
+ * Provides unified helper utilities for book covers.
+ * CRITICAL ARCHITECTURE RULE:
+ * There is exactly ONE authoritative source of truth for book covers:
+ * the `coverImage` field in the authoritative Book document (Firestore / bookService).
+ * 
+ * This service does NOT maintain a competing localStorage database.
+ * Any legacy localStorage cache is purged to ensure no stale data can override Firestore.
+ */
+
+import { bookService } from './bookService';
+
 const STORAGE_KEY_COVERS = 'mem_author_book_covers_v1';
 
-export interface BookCoverState {
-  [bookId: string]: string; // base64 data URL or asset URL
-}
-
 class CoverImageService {
-  private listeners: Array<() => void> = [];
-
-  public getCovers(): BookCoverState {
-    try {
-      const data = localStorage.getItem(STORAGE_KEY_COVERS);
-      return data ? JSON.parse(data) : {};
-    } catch {
-      return {};
+  constructor() {
+    // Purge any stale legacy localStorage database so it never overrides Firestore
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem(STORAGE_KEY_COVERS);
+      } catch {
+        // ignore storage errors
+      }
     }
   }
 
+  /**
+   * Retrieves the authoritative cover image for a book directly from the authoritative bookService.
+   */
   public getCover(bookId: string): string | null {
-    const covers = this.getCovers();
-    return covers[bookId] || null;
+    if (!bookId) return null;
+    const book = bookService.getCachedBookById(bookId);
+    return book?.coverImage || null;
   }
 
-  public setCover(bookId: string, dataUrl: string): void {
-    const covers = this.getCovers();
-    covers[bookId] = dataUrl;
-    try {
-      localStorage.setItem(STORAGE_KEY_COVERS, JSON.stringify(covers));
-      this.notify();
-    } catch (e) {
-      console.warn('Failed to save cover image to storage', e);
-    }
+  /**
+   * Sets the authoritative cover image for a book by updating the authoritative book record.
+   */
+  public setCover(bookId: string, urlOrDataUrl: string): void {
+    if (!bookId) return;
+    bookService.updateBookCover(bookId, urlOrDataUrl).catch((err) => {
+      console.warn('Failed to update book cover in authoritative bookService:', err);
+    });
   }
 
+  /**
+   * Removes the cover image by setting it to empty in the authoritative book record.
+   */
   public removeCover(bookId: string): void {
-    const covers = this.getCovers();
-    delete covers[bookId];
-    try {
-      localStorage.setItem(STORAGE_KEY_COVERS, JSON.stringify(covers));
-      this.notify();
-    } catch (e) {
-      console.warn('Failed to remove cover from storage', e);
-    }
+    if (!bookId) return;
+    bookService.updateBookCover(bookId, '').catch((err) => {
+      console.warn('Failed to remove book cover in authoritative bookService:', err);
+    });
   }
 
+  /**
+   * Subscribes to cover changes by subscribing directly to the authoritative bookService.
+   */
   public subscribe(listener: () => void): () => void {
-    this.listeners.push(listener);
-    return () => {
-      this.listeners = this.listeners.filter((l) => l !== listener);
-    };
-  }
-
-  private notify(): void {
-    this.listeners.forEach((fn) => fn());
+    return bookService.subscribe(listener);
   }
 }
 

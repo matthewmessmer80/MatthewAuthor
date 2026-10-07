@@ -14,23 +14,27 @@ import { AbyssalCurrentView } from './views/AbyssalCurrentView';
 import { IgnisKorView } from './views/IgnisKorView';
 import { BookPageView } from './views/BookPageView';
 import { StoriesView } from './views/StoriesView';
+import { DiscussionsView } from './views/DiscussionsView';
+import { SeriesPageView } from './views/SeriesPageView';
 import { CraftView } from './views/CraftView';
 import { AboutView } from './views/AboutView';
 import { NewsView } from './views/NewsView';
 import { ContactView } from './views/ContactView';
 import { PrivacyView } from './views/PrivacyView';
 import { AccountView } from './views/AccountView';
+import { AudioHubView } from './views/AudioHubView';
 import { ReadingRoomModal } from './components/ReadingRoomModal';
 import { BookDetailModal } from './components/BookDetailModal';
 import { PrivacyPolicyModal } from './components/PrivacyPolicyModal';
 import { ExitIntentModal } from './components/ExitIntentModal';
+import { GlobalSearchModal } from './components/GlobalSearchModal';
 import { NewsletterSignup } from './components/NewsletterSignup';
 import { AdminLoginView } from './views/admin/AdminLoginView';
 import { AdminDashboardView, AdminTab } from './views/admin/AdminDashboardView';
-import { bookService } from './services/bookService';
-import { BOOKS } from './data/authorData';
+import { bookService, managedBookToBook } from './services/bookService';
+import { newsletterService } from './services/newsletterService';
 import { Book, normalizeRole, UserRole } from './types';
-import { X, Shield, Loader2, User, ArrowLeft, AlertCircle } from 'lucide-react';
+import { X, Shield, Loader2, User, ArrowLeft, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 const ROUTE_PATH_MAP: Record<string, string> = {
   home: '/',
@@ -42,10 +46,13 @@ const ROUTE_PATH_MAP: Record<string, string> = {
   'blue-moon-child': '/the-blue-moon-child',
   'weavers-lullaby': '/the-weavers-lullaby',
   stories: '/stories',
+  discussions: '/discussions',
   craft: '/gallery',
   about: '/about',
   news: '/news',
   contact: '/contact',
+  'audio-hub': '/audio-hub',
+  audio: '/audio-hub',
   privacy: '/privacy',
   account: '/account',
   login: '/admin/login',
@@ -63,6 +70,15 @@ function getTabFromPathname(pathname: string): string {
   if (clean.startsWith('/admin') || clean.startsWith('/editor')) {
     return clean;
   }
+  if (clean.startsWith('/series/')) {
+    return clean;
+  }
+  if (clean.startsWith('/books/') || clean.startsWith('/book/')) {
+    return clean;
+  }
+  if (clean === '/books') {
+    return 'books';
+  }
   if (clean === '/account') {
     return '/account';
   }
@@ -76,14 +92,90 @@ function getTabFromPathname(pathname: string): string {
   if (clean.includes('blue-moon')) return 'blue-moon-child';
   if (clean.includes('weavers-lullaby') || clean.includes('lullaby')) return 'weavers-lullaby';
   if (clean.includes('stories')) return 'stories';
+  if (clean.includes('discussion')) return 'discussions';
   if (clean.includes('craft') || clean.includes('gallery')) return 'craft';
   if (clean.includes('about')) return 'about';
   if (clean.includes('news') || clean.includes('dispatches')) return 'news';
   if (clean.includes('contact')) return 'contact';
+  if (clean.includes('audio') || clean.includes('music') || clean.includes('soundtrack')) return 'audio-hub';
   if (clean.includes('privacy')) return 'privacy';
   if (clean.includes('account')) return '/account';
   if (clean.includes('books')) return 'books';
   return 'home';
+}
+
+function DynamicBookRoute({
+  bookSlugOrId,
+  onOpenExcerpt,
+  setActiveTab,
+  onOpenPrivacy,
+  onOpenAuthModal,
+}: {
+  bookSlugOrId: string;
+  onOpenExcerpt: (book: Book) => void;
+  setActiveTab: (tab: string) => void;
+  onOpenPrivacy?: () => void;
+  onOpenAuthModal: () => void;
+}) {
+  const [book, setBook] = useState<Book | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+    const load = async () => {
+      try {
+        const found = await bookService.getBookById(bookSlugOrId);
+        if (mounted) {
+          setBook(found ? managedBookToBook(found) : null);
+        }
+      } catch (err) {
+        console.warn('Error loading dynamic book route:', err);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+    load();
+    const unsub = bookService.subscribe(load);
+    return () => {
+      mounted = false;
+      unsub();
+    };
+  }, [bookSlugOrId]);
+
+  if (loading) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 py-24 text-center">
+        <div className="w-10 h-10 border-2 border-[#c5a059] border-t-transparent rounded-full animate-spin mx-auto" />
+      </div>
+    );
+  }
+
+  if (!book) {
+    return (
+      <div className="max-w-4xl mx-auto px-4 py-20 text-center space-y-6">
+        <h2 className="text-2xl font-cinzel font-bold text-[#f5efeb]">Book Not Found</h2>
+        <p className="text-xs text-[#8e887a] max-w-md mx-auto">
+          The requested book does not exist or may have been unlisted by the author.
+        </p>
+        <button
+          onClick={() => setActiveTab('books')}
+          className="px-5 py-2.5 bg-[#c5a059] text-[#0c0d12] text-xs font-cinzel font-bold uppercase rounded-lg cursor-pointer"
+        >
+          Return to Books Catalog
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <BookPageView
+      book={book}
+      onOpenExcerpt={onOpenExcerpt}
+      setActiveTab={setActiveTab}
+      onOpenPrivacy={onOpenPrivacy}
+      onOpenAuthModal={onOpenAuthModal}
+    />
+  );
 }
 
 function MainAppContent() {
@@ -100,10 +192,26 @@ function MainAppContent() {
   const [detailBook, setDetailBook] = useState<Book | null>(null);
   const [isPrivacyOpen, setIsPrivacyOpen] = useState<boolean>(false);
   const [isJoinModalOpen, setIsJoinModalOpen] = useState<boolean>(false);
+  const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false);
+  const [unsubscribeEmail, setUnsubscribeEmail] = useState<string | null>(null);
+  const [unsubscribeStatus, setUnsubscribeStatus] = useState<'confirming' | 'done' | null>(null);
 
-  // Seed books on initial app boot
+  // Check URL hash for unsubscribe triggers
   useEffect(() => {
-    bookService.seedInitialBooksIfEmpty();
+    const checkHash = () => {
+      const hash = window.location.hash;
+      if (hash && hash.includes('unsubscribe')) {
+        const params = new URLSearchParams(hash.replace(/^#unsubscribe\??/, ''));
+        const email = params.get('email');
+        if (email) {
+          setUnsubscribeEmail(decodeURIComponent(email));
+          setUnsubscribeStatus('confirming');
+        }
+      }
+    };
+    checkHash();
+    window.addEventListener('hashchange', checkHash);
+    return () => window.removeEventListener('hashchange', checkHash);
   }, []);
 
   // Listen to popstate (browser back/forward button)
@@ -143,10 +251,6 @@ function MainAppContent() {
       setIsJoinModalOpen(true);
     }
   };
-
-  const bookKingsSeverance = BOOKS.find((b) => b.id === 'kings-severance') || BOOKS[0];
-  const bookBlueMoon = BOOKS.find((b) => b.id === 'blue-moon-child') || BOOKS[1];
-  const bookWeavers = BOOKS.find((b) => b.id === 'weavers-lullaby') || BOOKS[2];
 
   const handleAuthSuccess = (targetRole?: UserRole) => {
     const norm = normalizeRole(targetRole || role);
@@ -207,6 +311,7 @@ function MainAppContent() {
           setActiveTab={(tab) => navigateTo(tab)}
           onJoinJourneyClick={handleJoinJourneyClick}
           isAdmin={isEditor}
+          onOpenSearch={() => setIsSearchOpen(true)}
           onOpenAdmin={() => {
             if (isAuthor) navigateTo('/admin', '/admin');
             else if (isEditor) navigateTo('/editor', '/editor');
@@ -319,6 +424,7 @@ function MainAppContent() {
     // Parse sub-tab from path
     let initialTab: AdminTab = 'dashboard';
     let editingBookId: string | null = null;
+    let initialSeriesAction: 'new' | null = null;
 
     if (currentRoute.includes('/admin/site')) {
       initialTab = 'site-editor';
@@ -336,10 +442,15 @@ function MainAppContent() {
       editingBookId = parts[3] || null;
     } else if (currentRoute.includes('books')) {
       initialTab = 'books';
+    } else if (currentRoute.includes('/series/new')) {
+      initialTab = 'series';
+      initialSeriesAction = 'new';
     } else if (currentRoute.includes('series')) {
       initialTab = 'series';
     } else if (currentRoute.includes('stories')) {
       initialTab = 'stories';
+    } else if (currentRoute.includes('music') || currentRoute.includes('songs')) {
+      initialTab = 'songs';
     } else if (currentRoute.includes('news')) {
       initialTab = 'news';
     } else if (currentRoute.includes('media') || currentRoute.includes('gallery')) {
@@ -362,6 +473,7 @@ function MainAppContent() {
       <AdminDashboardView
         initialTab={initialTab}
         editingBookId={editingBookId}
+        initialSeriesAction={initialSeriesAction}
         onReturnToSite={() => navigateTo('home', '/')}
       />
     );
@@ -376,6 +488,7 @@ function MainAppContent() {
         setActiveTab={(tab) => navigateTo(tab)}
         onJoinJourneyClick={handleJoinJourneyClick}
         isAdmin={isEditor}
+        onOpenSearch={() => setIsSearchOpen(true)}
         onOpenAdmin={() => {
           if (isAuthor) {
             navigateTo('/admin', '/admin');
@@ -430,29 +543,19 @@ function MainAppContent() {
           />
         )}
 
-        {currentRoute === 'kings-severance' && (
-          <BookPageView
-            book={bookKingsSeverance}
-            onOpenExcerpt={handleOpenExcerpt}
-            setActiveTab={(tab) => navigateTo(tab)}
-            onOpenPrivacy={() => setIsPrivacyOpen(true)}
-            onOpenAuthModal={() => navigateTo('/admin/login', '/admin/login')}
-          />
-        )}
-
-        {currentRoute === 'blue-moon-child' && (
-          <BookPageView
-            book={bookBlueMoon}
-            onOpenExcerpt={handleOpenExcerpt}
-            setActiveTab={(tab) => navigateTo(tab)}
-            onOpenPrivacy={() => setIsPrivacyOpen(true)}
-            onOpenAuthModal={() => navigateTo('/admin/login', '/admin/login')}
-          />
-        )}
-
-        {currentRoute === 'weavers-lullaby' && (
-          <BookPageView
-            book={bookWeavers}
+        {(currentRoute.startsWith('/books/') ||
+          currentRoute.startsWith('/book/') ||
+          currentRoute.startsWith('book-') ||
+          currentRoute === 'kings-severance' ||
+          currentRoute === 'blue-moon-child' ||
+          currentRoute === 'weavers-lullaby' ||
+          currentRoute === 'the-kings-severance' ||
+          currentRoute === 'the-blue-moon-child' ||
+          currentRoute === 'the-weavers-lullaby' ||
+          currentRoute === 'the-abyssal-current' ||
+          currentRoute === 'ignis-kor-the-heart-of-fire') && (
+          <DynamicBookRoute
+            bookSlugOrId={currentRoute.replace(/^\/books?\//, '')}
             onOpenExcerpt={handleOpenExcerpt}
             setActiveTab={(tab) => navigateTo(tab)}
             onOpenPrivacy={() => setIsPrivacyOpen(true)}
@@ -461,7 +564,26 @@ function MainAppContent() {
         )}
 
         {currentRoute === 'stories' && (
-          <StoriesView onOpenPrivacy={() => setIsPrivacyOpen(true)} />
+          <StoriesView
+            onOpenPrivacy={() => setIsPrivacyOpen(true)}
+            onOpenAuthModal={() => navigateTo('/admin/login', '/admin/login')}
+          />
+        )}
+
+        {currentRoute === 'discussions' && (
+          <DiscussionsView
+            onOpenAuthModal={() => navigateTo('/admin/login', '/admin/login')}
+          />
+        )}
+
+        {(currentRoute.startsWith('/series/') || currentRoute.startsWith('series-')) && (
+          <SeriesPageView
+            seriesSlugOrId={currentRoute.replace(/^\/series\//, '')}
+            onOpenExcerpt={handleOpenExcerpt}
+            onOpenBookDetail={handleOpenBookDetail}
+            setActiveTab={(tab) => navigateTo(tab)}
+            onOpenPrivacy={() => setIsPrivacyOpen(true)}
+          />
         )}
 
         {currentRoute === 'craft' && <CraftView />}
@@ -476,6 +598,13 @@ function MainAppContent() {
 
         {currentRoute === 'contact' && (
           <ContactView onOpenPrivacy={() => setIsPrivacyOpen(true)} />
+        )}
+
+        {(currentRoute === 'audio-hub' || currentRoute === 'audio') && (
+          <AudioHubView
+            onOpenPrivacy={() => setIsPrivacyOpen(true)}
+            setActiveTab={(tab) => navigateTo(tab)}
+          />
         )}
 
         {currentRoute === 'privacy' && (
@@ -558,6 +687,105 @@ function MainAppContent() {
                 // Keep open to let visitor read welcome text
               }}
             />
+          </div>
+        </div>
+      )}
+
+      {/* Global Search Modal with Series Support */}
+      <GlobalSearchModal
+        isOpen={isSearchOpen}
+        onClose={() => setIsSearchOpen(false)}
+        onNavigate={(route, path) => navigateTo(route, path)}
+      />
+
+      {/* 1-Click Unsubscribe Confirmation Modal */}
+      {unsubscribeEmail && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-in fade-in duration-200"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="relative w-full max-w-md bg-[#11131c] border border-[#2b2e40] rounded-2xl p-6 sm:p-7 shadow-2xl space-y-4">
+            <button
+              onClick={() => {
+                setUnsubscribeEmail(null);
+                setUnsubscribeStatus(null);
+                window.location.hash = '';
+              }}
+              className="absolute top-4 right-4 p-1.5 text-[#807b70] hover:text-[#f5efeb] hover:bg-[#1b1e2c] rounded-md transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            {unsubscribeStatus === 'confirming' ? (
+              <div className="space-y-4">
+                <div className="flex items-center gap-2.5 border-b border-[#212334] pb-3">
+                  <div className="p-2 bg-amber-950/50 border border-amber-700/40 rounded-lg text-amber-300">
+                    <AlertCircle className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-cinzel font-bold text-base text-[#f5efeb]">
+                      Unsubscribe from Newsletter
+                    </h3>
+                    <p className="text-[11px] text-[#8e887a]">One-click instant preference update</p>
+                  </div>
+                </div>
+
+                <p className="text-xs text-[#d4cfc2] leading-relaxed">
+                  Are you sure you want to unsubscribe <strong className="text-[#c5a059]">{unsubscribeEmail}</strong> from all author newsletters and dispatches?
+                </p>
+
+                <p className="text-[11px] text-[#7d776a]">
+                  You can subscribe again at any time from the website.
+                </p>
+
+                <div className="flex items-center justify-end gap-3 pt-2">
+                  <button
+                    onClick={() => {
+                      setUnsubscribeEmail(null);
+                      setUnsubscribeStatus(null);
+                      window.location.hash = '';
+                    }}
+                    className="px-4 py-2 bg-[#1b1e2c] hover:bg-[#25283c] text-xs font-cinzel text-[#d4cfc2] rounded-lg cursor-pointer"
+                  >
+                    Keep Subscription
+                  </button>
+                  <button
+                    onClick={() => {
+                      newsletterService.unsubscribe(unsubscribeEmail);
+                      setUnsubscribeStatus('done');
+                    }}
+                    className="px-5 py-2 bg-rose-700 hover:bg-rose-600 text-white font-cinzel font-bold text-xs uppercase tracking-wider rounded-lg transition-colors cursor-pointer shadow-lg"
+                  >
+                    Confirm Unsubscribe
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4 text-center py-2">
+                <div className="w-12 h-12 bg-emerald-950/80 border border-emerald-600/50 rounded-full flex items-center justify-center mx-auto text-emerald-400">
+                  <CheckCircle2 className="w-6 h-6" />
+                </div>
+                <div className="space-y-1">
+                  <h3 className="font-cinzel font-bold text-base text-[#f5efeb]">
+                    Successfully Unsubscribed
+                  </h3>
+                  <p className="text-xs text-[#8e887a]">
+                    <strong className="text-[#d4cfc2]">{unsubscribeEmail}</strong> has been removed from all future newsletter mailings.
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setUnsubscribeEmail(null);
+                    setUnsubscribeStatus(null);
+                    window.location.hash = '';
+                  }}
+                  className="px-5 py-2 bg-[#c5a059] text-[#0c0d12] font-cinzel font-bold text-xs uppercase tracking-wider rounded-lg cursor-pointer"
+                >
+                  Return to Site
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

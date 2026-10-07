@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { NewsArticle } from '../types';
-import { NEWS_ARTICLES } from '../data/authorData';
+import { newsService } from '../services/newsService';
 import { NewsletterSignup } from '../components/NewsletterSignup';
 import { useSEO } from '../hooks/useSEO';
-import { Feather, Calendar, Clock, Tag, ArrowRight, BookOpen, ChevronLeft } from 'lucide-react';
+import { Feather, Calendar, Clock, Tag, ArrowRight, BookOpen, ChevronLeft, Loader2 } from 'lucide-react';
 
 interface NewsViewProps {
   onOpenPrivacy?: () => void;
@@ -12,10 +12,27 @@ interface NewsViewProps {
 export const NewsView: React.FC<NewsViewProps> = ({ onOpenPrivacy }) => {
   const [selectedArticle, setSelectedArticle] = useState<NewsArticle | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [articles, setArticles] = useState<NewsArticle[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useSEO(selectedArticle ? `news/${selectedArticle.slug}` : 'news');
 
-  const filteredArticles = NEWS_ARTICLES.filter((article) => {
+  useEffect(() => {
+    const unsub = newsService.subscribe((list) => {
+      // Security: Public readers must only see PUBLIC or TEASER articles. Never DRAFT or PRIVATE.
+      const publicOnly = list.filter((a) => {
+        const state = (a.publicationState || 'PUBLIC').toUpperCase();
+        return state === 'PUBLIC' || state === 'TEASER';
+      });
+      setArticles(publicOnly);
+      setLoading(false);
+    });
+    return () => unsub();
+  }, []);
+
+  const categories = Array.from(new Set(articles.map((a) => a.category).filter(Boolean)));
+
+  const filteredArticles = articles.filter((article) => {
     if (categoryFilter === 'all') return true;
     return article.category === categoryFilter;
   });
@@ -105,78 +122,72 @@ export const NewsView: React.FC<NewsViewProps> = ({ onOpenPrivacy }) => {
               >
                 All Dispatches
               </button>
-              <button
-                onClick={() => setCategoryFilter('Writing Progress')}
-                className={`px-3 py-1.5 text-xs font-cinzel rounded-md transition-colors cursor-pointer ${
-                  categoryFilter === 'Writing Progress'
-                    ? 'bg-[#c5a059] text-[#0d0e14] font-bold'
-                    : 'text-[#9c9689] hover:text-[#f5efeb]'
-                }`}
-              >
-                Writing Progress
-              </button>
-              <button
-                onClick={() => setCategoryFilter('Craft & Engraving')}
-                className={`px-3 py-1.5 text-xs font-cinzel rounded-md transition-colors cursor-pointer ${
-                  categoryFilter === 'Craft & Engraving'
-                    ? 'bg-[#c5a059] text-[#0d0e14] font-bold'
-                    : 'text-[#9c9689] hover:text-[#f5efeb]'
-                }`}
-              >
-                Craft & Engraving
-              </button>
-              <button
-                onClick={() => setCategoryFilter('Announcement')}
-                className={`px-3 py-1.5 text-xs font-cinzel rounded-md transition-colors cursor-pointer ${
-                  categoryFilter === 'Announcement'
-                    ? 'bg-[#c5a059] text-[#0d0e14] font-bold'
-                    : 'text-[#9c9689] hover:text-[#f5efeb]'
-                }`}
-              >
-                Announcements
-              </button>
+              {categories.map((cat) => (
+                <button
+                  key={cat}
+                  onClick={() => setCategoryFilter(cat)}
+                  className={`px-3 py-1.5 text-xs font-cinzel rounded-md transition-colors cursor-pointer ${
+                    categoryFilter === cat
+                      ? 'bg-[#c5a059] text-[#0d0e14] font-bold'
+                      : 'text-[#9c9689] hover:text-[#f5efeb]'
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
             </div>
           </div>
 
-          <div className="space-y-4">
-            {filteredArticles.map((article) => (
-              <div
-                key={article.id}
-                onClick={() => setSelectedArticle(article)}
-                className="p-6 sm:p-8 rounded-xl bg-[#12141e] border border-[#232635] hover:border-[#c5a059]/40 transition-all cursor-pointer group space-y-3"
-              >
-                <div className="flex items-center justify-between text-xs text-[#8e887a]">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[#c5a059] font-semibold">{article.category}</span>
-                    <span aria-hidden="true">·</span>
-                    <span>{article.date}</span>
-                  </div>
-                  <span>{article.readTime}</span>
-                </div>
-
-                <h3 className="text-xl sm:text-2xl font-cinzel font-bold text-[#f5efeb] group-hover:text-[#c5a059] transition-colors leading-tight">
-                  {article.title}
-                </h3>
-
-                <p className="text-xs sm:text-sm text-[#aba597] leading-relaxed">
-                  {article.summary}
-                </p>
-
-                <div className="pt-2 flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2 text-[#736e63]">
-                    {article.tags.map((t) => (
-                      <span key={t}>#{t}</span>
-                    ))}
+          {loading ? (
+            <div className="p-12 text-center text-[#8e887a] space-y-2">
+              <Loader2 className="w-6 h-6 animate-spin mx-auto text-[#c5a059]" />
+              <p className="text-xs font-cinzel">Loading dispatches...</p>
+            </div>
+          ) : filteredArticles.length === 0 ? (
+            <div className="p-12 text-center bg-[#11131c] border border-[#232635] rounded-xl text-xs text-[#8e887a]">
+              No dispatches currently available in this category.
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {filteredArticles.map((article) => (
+                <div
+                  key={article.id}
+                  onClick={() => setSelectedArticle(article)}
+                  className="p-6 sm:p-8 rounded-xl bg-[#12141e] border border-[#232635] hover:border-[#c5a059]/40 transition-all cursor-pointer group space-y-3"
+                >
+                  <div className="flex items-center justify-between text-xs text-[#8e887a]">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[#c5a059] font-semibold">{article.category}</span>
+                      <span aria-hidden="true">·</span>
+                      <span>{article.date}</span>
+                    </div>
+                    <span>{article.readTime}</span>
                   </div>
 
-                  <span className="text-[#c5a059] font-medium flex items-center gap-1 group-hover:translate-x-1 transition-transform">
-                    <span>Read Dispatch</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </span>
+                  <h3 className="text-xl sm:text-2xl font-cinzel font-bold text-[#f5efeb] group-hover:text-[#c5a059] transition-colors leading-tight">
+                    {article.title}
+                  </h3>
+
+                  <p className="text-xs sm:text-sm text-[#aba597] leading-relaxed">
+                    {article.summary}
+                  </p>
+
+                  <div className="pt-2 flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2 text-[#736e63]">
+                      {article.tags.map((t) => (
+                        <span key={t}>#{t}</span>
+                      ))}
+                    </div>
+
+                    <span className="text-[#c5a059] font-medium flex items-center gap-1 group-hover:translate-x-1 transition-transform">
+                      <span>Read Dispatch</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </span>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

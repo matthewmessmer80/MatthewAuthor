@@ -5,11 +5,10 @@ import {
   getDocs,
   setDoc,
   updateDoc,
-  query,
-  orderBy,
+  deleteDoc,
   serverTimestamp,
 } from 'firebase/firestore';
-import { db, auth, ADMIN_EMAIL } from './firebase';
+import { db, auth, ADMIN_EMAIL, AUTHOR_ADMIN_EMAILS } from './firebase';
 import { UserProfile, UserRole, AccountStatus, normalizeRole } from '../types';
 
 const USERS_COLLECTION = 'users';
@@ -71,6 +70,9 @@ class UserService {
       email: string;
       emailVerified?: boolean;
       newsletterSubscribed?: boolean;
+      city?: string;
+      state?: string;
+      country?: string;
     }
   ): Promise<UserProfile> {
     const username = data.username.trim();
@@ -99,6 +101,9 @@ class UserService {
       photoURL: '',
       shortBio: '',
       newsletterSubscribed: !!data.newsletterSubscribed,
+      city: data.city?.trim() || '',
+      state: data.state?.trim() || '',
+      country: data.country?.trim() || '',
     };
 
     const userDocRef = doc(db, USERS_COLLECTION, uid);
@@ -124,7 +129,7 @@ class UserService {
     }
 
     const emailLower = user.email.toLowerCase();
-    const isDesignatedAuthor = emailLower === ADMIN_EMAIL.toLowerCase();
+    const isDesignatedAuthor = AUTHOR_ADMIN_EMAILS.includes(emailLower);
     const userDocRef = doc(db, USERS_COLLECTION, user.uid);
     const now = new Date().toISOString();
 
@@ -204,39 +209,41 @@ class UserService {
   }
 
   /**
-   * Fetches all registered users (AUTHOR ONLY)
+   * Fetches all registered users (AUTHOR & EDITOR)
    */
   async getAllUsers(): Promise<UserProfile[]> {
     try {
-      const q = query(collection(db, USERS_COLLECTION), orderBy('createdAt', 'desc'));
-      const snap = await getDocs(q);
+      const snap = await getDocs(collection(db, USERS_COLLECTION));
       const users: UserProfile[] = [];
       snap.forEach((d) => {
-        users.push({ ...(d.data() as UserProfile), uid: d.id });
+        const raw = d.data() as any;
+        const normRole = normalizeRole(raw.role);
+        // Canonicalize role representation
+        const canonicalRole: UserRole = normRole === 'author' ? 'AUTHOR' : normRole === 'editor' ? 'EDITOR' : 'READER';
+        
+        users.push({
+          ...raw,
+          uid: d.id,
+          role: canonicalRole,
+          status: raw.status === 'suspended' ? 'suspended' : 'active',
+          displayName: raw.displayName || raw.username || raw.email || 'Reader',
+        });
       });
 
-      // Ensure designated author is always present
-      const authorPresent = users.some((u) => u.email.toLowerCase() === ADMIN_EMAIL.toLowerCase());
-      if (!authorPresent) {
-        users.unshift({
-          uid: 'author-default-root',
-          email: ADMIN_EMAIL.toLowerCase(),
-          username: 'MatthewEMessmer',
-          usernameNormalized: 'matthewemessmer',
-          displayName: 'Matthew E. Messmer',
-          firstName: 'Matthew',
-          lastName: 'Messmer',
-          profileImage: '',
-          bio: 'Author and Creator of The Breathwoven Cycle.',
-          role: 'author',
-          status: 'active',
-          emailVerified: true,
-          createdAt: new Date('2024-01-01').toISOString(),
-          updatedAt: new Date().toISOString(),
-          lastLoginAt: new Date().toISOString(),
-          newsletterSubscribed: true,
-        });
-      }
+      // Sort by createdAt descending
+      users.sort((a, b) => {
+        const timeA = typeof a.createdAt === 'string' ? new Date(a.createdAt).getTime() : 0;
+        const timeB = typeof b.createdAt === 'string' ? new Date(b.createdAt).getTime() : 0;
+        return timeB - timeA;
+      });
+
+      // Ensure designated authors (including memauthor1980@gamil.com) are recognized as Authors
+      users.forEach((u) => {
+        const emailLower = (u.email || '').toLowerCase();
+        if (AUTHOR_ADMIN_EMAILS.includes(emailLower)) {
+          u.role = 'AUTHOR';
+        }
+      });
 
       this.saveLocalCache(users);
       return users;
@@ -254,7 +261,7 @@ class UserService {
           displayName: 'Matthew E. Messmer',
           firstName: 'Matthew',
           lastName: 'Messmer',
-          role: 'author',
+          role: 'AUTHOR',
           status: 'active',
           profileImage: '',
           bio: 'Author & Master Craftsman',
@@ -271,7 +278,7 @@ class UserService {
           displayName: 'Elena Vane',
           firstName: 'Elena',
           lastName: 'Vane',
-          role: 'editor',
+          role: 'EDITOR',
           status: 'active',
           profileImage: '',
           bio: 'Lead developmental editor for epic fantasy manuscripts.',
@@ -288,7 +295,7 @@ class UserService {
           displayName: 'Samuel Kaye',
           firstName: 'Samuel',
           lastName: 'Kaye',
-          role: 'reader',
+          role: 'READER',
           status: 'active',
           profileImage: '',
           bio: 'High fantasy enthusiast and collector of signed editions.',
@@ -312,7 +319,7 @@ class UserService {
   }
 
   /**
-   * Updates user role (AUTHOR ONLY) with self-lockout safeguards
+   * Updates user role (AUTHOR & EDITOR) with self-lockout safeguards
    */
   async updateUserRole(
     targetUserId: string,
@@ -328,6 +335,7 @@ class UserService {
 
     const normCurrentRole = normalizeRole(targetUser.role);
     const normNewRole = normalizeRole(newRole);
+    const canonicalRole: UserRole = normNewRole === 'author' ? 'AUTHOR' : normNewRole === 'editor' ? 'EDITOR' : 'READER';
 
     // SELF-LOCKOUT PROTECTION:
     if (normCurrentRole === 'author' && normNewRole !== 'author') {
@@ -343,27 +351,34 @@ class UserService {
     try {
       const userRef = doc(db, USERS_COLLECTION, targetUserId);
       await updateDoc(userRef, {
-        role: normNewRole,
+        role: canonicalRole,
         updatedAt: serverTimestamp(),
       });
 
-      // Also sync admins registry if applicable
+      // Also sync admins registry
       const adminRef = doc(db, 'admins', targetUserId);
-      if (normNewRole === 'author' || normNewRole === 'editor') {
-        await setDoc(adminRef, {
-          email: targetUser.email,
-          role: normNewRole,
-          updatedAt: serverTimestamp(),
-        }, { merge: true });
+      if (canonicalRole === 'AUTHOR' || canonicalRole === 'EDITOR') {
+        await setDoc(
+          adminRef,
+          {
+            email: targetUser.email,
+            role: canonicalRole.toLowerCase(),
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
       } else {
-        await updateDoc(adminRef, { role: 'reader' }).catch(() => {});
+        // Demoted to reader: remove from admins collection
+        await deleteDoc(adminRef).catch(() => {});
       }
-    } catch (err) {
-      console.warn('Could not update role in Firestore, updating local cache:', err);
+    } catch (err: unknown) {
+      console.error('[userService] Firestore role update error:', err);
+      const msg = err instanceof Error ? err.message : 'Failed to update user role in Firestore.';
+      return { success: false, error: msg };
     }
 
     const updated = allUsers.map((u) =>
-      u.uid === targetUserId ? { ...u, role: normNewRole } : u
+      u.uid === targetUserId ? { ...u, role: canonicalRole } : u
     );
     this.saveLocalCache(updated);
 
@@ -402,14 +417,58 @@ class UserService {
         status: newStatus,
         updatedAt: serverTimestamp(),
       });
-    } catch (err) {
-      console.warn('Could not update status in Firestore, updating local cache:', err);
+    } catch (err: unknown) {
+      console.error('[userService] Firestore status update error:', err);
+      const msg = err instanceof Error ? err.message : 'Failed to update user status in Firestore.';
+      return { success: false, error: msg };
     }
 
     const updated = allUsers.map((u) =>
       u.uid === targetUserId ? { ...u, status: newStatus } : u
     );
     this.saveLocalCache(updated);
+
+    return { success: true };
+  }
+
+  /**
+   * Permanently deletes a user from Firestore and admins collection
+   */
+  async deleteUser(
+    targetUserId: string,
+    currentAuthorId: string
+  ): Promise<{ success: boolean; error?: string }> {
+    const allUsers = await this.getAllUsers();
+    const targetUser = allUsers.find((u) => u.uid === targetUserId);
+
+    if (!targetUser) {
+      return { success: false, error: 'User not found.' };
+    }
+
+    // SELF-LOCKOUT PROTECTION:
+    if (normalizeRole(targetUser.role) === 'author') {
+      const activeAuthorCount = allUsers.filter((u) => normalizeRole(u.role) === 'author' && u.status === 'active').length;
+      if (activeAuthorCount <= 1) {
+        return {
+          success: false,
+          error: 'Cannot delete the sole Author account.',
+        };
+      }
+    }
+
+    try {
+      // 1. Delete from users collection
+      await deleteDoc(doc(db, USERS_COLLECTION, targetUserId));
+      // 2. Delete from admins collection
+      await deleteDoc(doc(db, 'admins', targetUserId)).catch(() => {});
+    } catch (err: unknown) {
+      console.error('[userService] Firestore delete user error:', err);
+      const msg = err instanceof Error ? err.message : 'Failed to delete user from Firestore.';
+      return { success: false, error: msg };
+    }
+
+    const remaining = allUsers.filter((u) => u.uid !== targetUserId);
+    this.saveLocalCache(remaining);
 
     return { success: true };
   }
@@ -429,6 +488,9 @@ class UserService {
       profileImage?: string;
       photoURL?: string;
       newsletterSubscribed?: boolean;
+      city?: string;
+      state?: string;
+      country?: string;
     }
   ): Promise<{ success: boolean; error?: string }> {
     const now = new Date().toISOString();

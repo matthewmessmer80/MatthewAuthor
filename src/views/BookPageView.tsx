@@ -138,8 +138,8 @@ export const BookPageView: React.FC<BookPageViewProps> = ({
         {/* Right: Cover Presentation & Bibliographic Specs */}
         <div className="lg:col-span-5 flex flex-col items-center">
           <div className="w-full max-w-sm rounded-xl overflow-hidden shadow-2xl border border-[#2b2e3f] bg-[#12141d] p-6 space-y-4">
-            <div className="aspect-[3/4] w-full rounded-lg overflow-hidden border border-[#36384a]">
-              <BookCoverArt book={book} size="lg" />
+            <div className="aspect-[2/3] w-full rounded-lg overflow-hidden border border-[#36384a]">
+              <BookCoverArt book={book} className="w-full h-full" />
             </div>
 
             <div className="space-y-2 text-xs text-[#a39e90]">
@@ -153,7 +153,7 @@ export const BookPageView: React.FC<BookPageViewProps> = ({
               </div>
               <div className="flex justify-between border-b border-[#212332] pb-1">
                 <span>Formats:</span>
-                <span>{book.format.join(', ')}</span>
+                <span>{(book.format || ['Hardcover', 'Paperback', 'E-Book']).join(', ')}</span>
               </div>
               <div className="flex justify-between border-b border-[#212332] pb-1">
                 <span>Publisher:</span>
@@ -170,32 +170,37 @@ export const BookPageView: React.FC<BookPageViewProps> = ({
       </div>
 
       {/* Excerpt Section */}
-      <div className="bg-[#11131c] border border-[#282a3c] rounded-2xl p-6 sm:p-10 space-y-4">
-        <div className="flex items-center justify-between border-b border-[#212334] pb-4">
-          <div>
-            <span className="text-xs uppercase font-cinzel tracking-widest text-[#c5a059] font-semibold">
-              First Chapter Reading
-            </span>
-            <h3 className="text-xl font-cinzel font-bold text-[#f5efeb] mt-0.5">
-              {book.excerpt.chapterTitle}
-            </h3>
-          </div>
-          <button
-            onClick={() => onOpenExcerpt(book)}
-            className="text-xs text-[#c5a059] hover:underline font-cinzel cursor-pointer"
-          >
-            Launch Fullscreen Reading Room →
-          </button>
-        </div>
+      {(() => {
+        const excerpt = book.excerpt || { chapterTitle: 'First Chapter Reading', text: ['Excerpt coming soon.'] };
+        return (
+          <div className="bg-[#11131c] border border-[#282a3c] rounded-2xl p-6 sm:p-10 space-y-4">
+            <div className="flex items-center justify-between border-b border-[#212334] pb-4">
+              <div>
+                <span className="text-xs uppercase font-cinzel tracking-widest text-[#c5a059] font-semibold">
+                  First Chapter Reading
+                </span>
+                <h3 className="text-xl font-cinzel font-bold text-[#f5efeb] mt-0.5">
+                  {excerpt.chapterTitle}
+                </h3>
+              </div>
+              <button
+                onClick={() => onOpenExcerpt(book)}
+                className="text-xs text-[#c5a059] hover:underline font-cinzel cursor-pointer"
+              >
+                Launch Fullscreen Reading Room →
+              </button>
+            </div>
 
-        <div className="space-y-4 font-serif text-sm sm:text-base text-[#c9c4b7] leading-relaxed max-w-3xl">
-          {book.excerpt.text.map((para, idx) => (
-            <p key={idx} className={idx === 0 ? 'first-letter:text-4xl first-letter:font-cinzel first-letter:text-[#c5a059] first-letter:float-left first-letter:mr-2' : ''}>
-              {para}
-            </p>
-          ))}
-        </div>
-      </div>
+            <div className="space-y-4 font-serif text-sm sm:text-base text-[#c9c4b7] leading-relaxed max-w-3xl">
+              {excerpt.text.map((para, idx) => (
+                <p key={idx} className={idx === 0 ? 'first-letter:text-4xl first-letter:font-cinzel first-letter:text-[#c5a059] first-letter:float-left first-letter:mr-2' : ''}>
+                  {para}
+                </p>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Reader Discussion / Comments Section (Prompt Section 5) */}
       <ReaderComments

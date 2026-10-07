@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { userService } from '../../services/userService';
-import { UserProfile, UserRole, AccountStatus } from '../../types';
+import { UserProfile, UserRole, AccountStatus, normalizeRole } from '../../types';
 import {
   Users,
   Search,
@@ -18,6 +18,8 @@ import {
   Clock,
   KeyRound,
   RefreshCw,
+  Trash2,
+  MapPin,
 } from 'lucide-react';
 
 export const AdminUsersView: React.FC = () => {
@@ -35,6 +37,10 @@ export const AdminUsersView: React.FC = () => {
 
   // Status toggle confirmation
   const [statusTargetUser, setStatusTargetUser] = useState<UserProfile | null>(null);
+
+  // User deletion confirmation
+  const [deleteTargetUser, setDeleteTargetUser] = useState<UserProfile | null>(null);
+  const [isDeletingUser, setIsDeletingUser] = useState(false);
 
   // Feedback notifications
   const [bannerSuccess, setBannerSuccess] = useState<string | null>(null);
@@ -56,14 +62,14 @@ export const AdminUsersView: React.FC = () => {
     loadUsers();
   }, []);
 
-  const activeAuthorCount = users.filter((u) => u.role === 'AUTHOR' && u.status === 'active').length;
+  const activeAuthorCount = users.filter((u) => normalizeRole(u.role) === 'author' && u.status === 'active').length;
 
   const filteredUsers = users.filter((u) => {
     // Role filter
     if (roleFilter === 'DISABLED') {
       if (u.status !== 'suspended') return false;
     } else if (roleFilter !== 'ALL') {
-      if (u.role !== roleFilter) return false;
+      if (normalizeRole(u.role).toUpperCase() !== roleFilter) return false;
     }
 
     // Search query
@@ -76,6 +82,37 @@ export const AdminUsersView: React.FC = () => {
 
     return true;
   });
+
+  const handleDeleteUserInitiate = (user: UserProfile) => {
+    setBannerError(null);
+    if (normalizeRole(user.role) === 'author' && activeAuthorCount <= 1) {
+      setBannerError('Cannot delete the sole Author account.');
+      return;
+    }
+    setDeleteTargetUser(user);
+  };
+
+  const handleConfirmDeleteUser = async () => {
+    if (!deleteTargetUser || !currentAuthUser) return;
+    setIsDeletingUser(true);
+    setBannerError(null);
+    try {
+      const res = await userService.deleteUser(deleteTargetUser.uid, currentAuthUser.uid);
+      if (res.success) {
+        setBannerSuccess(`Successfully deleted user "${deleteTargetUser.displayName || deleteTargetUser.email}" from Firebase.`);
+        setDeleteTargetUser(null);
+        await loadUsers();
+        setTimeout(() => setBannerSuccess(null), 4000);
+      } else {
+        setBannerError(res.error || 'Failed to delete user.');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to delete user.';
+      setBannerError(msg);
+    } finally {
+      setIsDeletingUser(false);
+    }
+  };
 
   const handleRoleChangeInitiate = (user: UserProfile, newRole: UserRole) => {
     setBannerError(null);
@@ -213,13 +250,13 @@ export const AdminUsersView: React.FC = () => {
         <div className="bg-[#12141e] border border-[#232635] rounded-xl p-4 space-y-1">
           <span className="text-[11px] font-cinzel text-[#8f897c] uppercase">Readers</span>
           <p className="text-2xl font-cinzel font-bold text-emerald-400">
-            {users.filter((u) => u.role === 'READER').length}
+            {users.filter((u) => normalizeRole(u.role) === 'reader').length}
           </p>
         </div>
         <div className="bg-[#12141e] border border-[#232635] rounded-xl p-4 space-y-1">
           <span className="text-[11px] font-cinzel text-[#8f897c] uppercase">Editors</span>
           <p className="text-2xl font-cinzel font-bold text-blue-400">
-            {users.filter((u) => u.role === 'EDITOR').length}
+            {users.filter((u) => normalizeRole(u.role) === 'editor').length}
           </p>
         </div>
         <div className="bg-[#12141e] border border-[#232635] rounded-xl p-4 space-y-1">
@@ -275,6 +312,7 @@ export const AdminUsersView: React.FC = () => {
               <tr>
                 <th className="py-3.5 px-4">User</th>
                 <th className="py-3.5 px-4">Role</th>
+                <th className="py-3.5 px-4">Location (Optional)</th>
                 <th className="py-3.5 px-4">Status</th>
                 <th className="py-3.5 px-4">Joined Date</th>
                 <th className="py-3.5 px-4 text-right">Actions</th>
@@ -283,19 +321,22 @@ export const AdminUsersView: React.FC = () => {
             <tbody className="divide-y divide-[#1e202f]">
               {loading ? (
                 <tr>
-                  <td colSpan={5} className="py-12 text-center text-[#7d786d] font-cinzel">
+                  <td colSpan={6} className="py-12 text-center text-[#7d786d] font-cinzel">
                     Loading registered user directory...
                   </td>
                 </tr>
               ) : filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-12 text-center text-[#7d786d] font-cinzel">
+                  <td colSpan={6} className="py-12 text-center text-[#7d786d] font-cinzel">
                     No users matching criteria.
                   </td>
                 </tr>
               ) : (
                 filteredUsers.map((user) => {
                   const isSoleAuthor = user.role === 'AUTHOR' && activeAuthorCount <= 1;
+
+                  const normRole = normalizeRole(user.role);
+                  const canonicalRole = normRole.toUpperCase() as UserRole;
 
                   return (
                     <tr key={user.uid} className="hover:bg-[#151724] transition-colors">
@@ -326,19 +367,19 @@ export const AdminUsersView: React.FC = () => {
                         <div className="flex items-center gap-2">
                           <span
                             className={`px-2 py-0.5 rounded text-[10px] font-cinzel font-bold uppercase tracking-wider border ${
-                              user.role === 'AUTHOR'
+                              canonicalRole === 'AUTHOR'
                                 ? 'bg-[#c5a059]/20 text-[#c5a059] border-[#c5a059]/40'
-                                : user.role === 'EDITOR'
+                                : canonicalRole === 'EDITOR'
                                 ? 'bg-blue-600/20 text-blue-300 border-blue-500/40'
                                 : 'bg-emerald-600/20 text-emerald-300 border-emerald-500/40'
                             }`}
                           >
-                            {user.role}
+                            {canonicalRole}
                           </span>
 
                           {/* Quick Role Shift Dropdown */}
                           <select
-                            value={user.role}
+                            value={canonicalRole}
                             onChange={(e) => handleRoleChangeInitiate(user, e.target.value as UserRole)}
                             className="bg-[#191b29] border border-[#2b2e40] text-[11px] text-[#d6d0c4] rounded px-2 py-1 focus:outline-none focus:border-[#c5a059] cursor-pointer"
                           >
@@ -347,6 +388,20 @@ export const AdminUsersView: React.FC = () => {
                             <option value="AUTHOR">Author</option>
                           </select>
                         </div>
+                      </td>
+
+                      {/* Location (Optional) */}
+                      <td className="py-3.5 px-4">
+                        {user.city || user.state || user.country ? (
+                          <div className="flex items-center gap-1.5 text-[11px] text-[#f5efeb]">
+                            <MapPin className="w-3.5 h-3.5 text-[#c5a059] shrink-0" />
+                            <span>
+                              {[user.city, user.state, user.country].filter(Boolean).join(', ')}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-[11px] text-[#696356] italic">Not provided</span>
+                        )}
                       </td>
 
                       {/* Status */}
@@ -371,17 +426,22 @@ export const AdminUsersView: React.FC = () => {
                         })}
                       </td>
 
-                      {/* Actions */}
+                      {/* Actions: Change Role | Suspend | Reset Password | Delete */}
                       <td className="py-3.5 px-4 text-right">
-                        <div className="flex items-center justify-end gap-2">
+                        <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                          {/* Change Role Button */}
                           <button
-                            onClick={() => handleSendReset(user.email)}
-                            title="Send Password Reset Email"
-                            className="p-1.5 bg-[#171926] hover:bg-[#202334] border border-[#2b2e40] text-[#a8a396] hover:text-[#c5a059] rounded-md transition-colors cursor-pointer"
+                            onClick={() => {
+                              const nextRole: UserRole = canonicalRole === 'READER' ? 'EDITOR' : canonicalRole === 'EDITOR' ? 'AUTHOR' : 'READER';
+                              handleRoleChangeInitiate(user, nextRole);
+                            }}
+                            title="Change user role"
+                            className="px-2.5 py-1 bg-[#171926] hover:bg-[#202334] border border-[#2b2e40] text-[#a8a396] hover:text-[#c5a059] rounded text-[11px] font-cinzel transition-colors cursor-pointer"
                           >
-                            <KeyRound className="w-3.5 h-3.5" />
+                            Change Role
                           </button>
 
+                          {/* Suspend / Restore Button */}
                           <button
                             onClick={() => handleToggleStatus(user)}
                             disabled={isSoleAuthor}
@@ -389,20 +449,39 @@ export const AdminUsersView: React.FC = () => {
                               isSoleAuthor
                                 ? 'Sole Author protected against self-lockout'
                                 : user.status === 'active'
-                                ? 'Disable Account'
-                                : 'Enable Account'
+                                ? 'Suspend User Account'
+                                : 'Restore/Unsuspend User Account'
                             }
-                            className={`p-1.5 rounded-md border transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${
+                            className={`px-2.5 py-1 rounded border text-[11px] font-cinzel transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${
                               user.status === 'active'
                                 ? 'bg-[#211618] hover:bg-[#2e1c1f] border-rose-500/30 text-rose-300'
                                 : 'bg-[#162118] hover:bg-[#1e2e21] border-emerald-500/30 text-emerald-300'
                             }`}
                           >
-                            {user.status === 'active' ? (
-                              <UserX className="w-3.5 h-3.5" />
-                            ) : (
-                              <UserCheck className="w-3.5 h-3.5" />
-                            )}
+                            {user.status === 'active' ? 'Suspend' : 'Unsuspend'}
+                          </button>
+
+                          {/* Reset Password Button */}
+                          <button
+                            onClick={() => handleSendReset(user.email)}
+                            title="Send Password Reset Email to registered address"
+                            className="p-1.5 bg-[#171926] hover:bg-[#202334] border border-[#2b2e40] text-[#a8a396] hover:text-[#c5a059] rounded transition-colors cursor-pointer"
+                          >
+                            <KeyRound className="w-3.5 h-3.5" />
+                          </button>
+
+                          {/* Delete User Button */}
+                          <button
+                            onClick={() => handleDeleteUserInitiate(user)}
+                            disabled={isSoleAuthor}
+                            title={
+                              isSoleAuthor
+                                ? 'Sole Author cannot be deleted'
+                                : 'Permanently delete user profile from Firebase'
+                            }
+                            className="p-1.5 bg-[#211618] hover:bg-[#2e1c1f] border border-rose-500/30 text-rose-400 hover:text-rose-200 rounded transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </td>
@@ -442,7 +521,7 @@ export const AdminUsersView: React.FC = () => {
             <div className="space-y-3 text-xs text-[#ccc7bd]">
               <p>
                 Are you sure you want to change <strong className="text-[#f5efeb]">{targetUser.displayName}</strong>'s role from{' '}
-                <span className="text-[#c5a059] uppercase font-cinzel font-bold">{targetUser.role}</span> to{' '}
+                <span className="text-[#c5a059] uppercase font-cinzel font-bold">{normalizeRole(targetUser.role).toUpperCase()}</span> to{' '}
                 <span className="text-emerald-400 uppercase font-cinzel font-bold">{pendingRole}</span>?
               </p>
 
@@ -486,6 +565,58 @@ export const AdminUsersView: React.FC = () => {
                 className="px-5 py-2.5 bg-[#c5a059] hover:bg-[#d6b066] text-[#0c0d12] text-xs font-cinzel font-bold tracking-wider uppercase rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
               >
                 {isUpdatingRole ? 'Updating...' : `Confirm Change to ${pendingRole}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete User Confirmation Modal */}
+      {deleteTargetUser && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-in fade-in"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="relative w-full max-w-md bg-[#11131c] border border-rose-500/40 rounded-2xl p-6 sm:p-8 shadow-2xl space-y-5">
+            <div className="flex items-center justify-between border-b border-[#212334] pb-3">
+              <div className="flex items-center gap-2 font-cinzel font-bold text-base text-rose-300">
+                <Trash2 className="w-5 h-5 text-rose-400" />
+                <span>Confirm User Deletion</span>
+              </div>
+              <button
+                onClick={() => setDeleteTargetUser(null)}
+                className="text-[#807b70] hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs text-[#ccc7bd]">
+              <p>
+                Are you sure you want to permanently delete user{' '}
+                <strong className="text-[#f5efeb]">{deleteTargetUser.displayName || deleteTargetUser.email}</strong>?
+              </p>
+              <p className="text-[11px] text-rose-300/80 leading-relaxed">
+                This action is irreversible and permanently removes the user profile and administrative permissions from Firestore.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                onClick={() => setDeleteTargetUser(null)}
+                disabled={isDeletingUser}
+                className="px-4 py-2 text-xs font-cinzel text-[#8f897c] hover:text-white"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmDeleteUser}
+                disabled={isDeletingUser}
+                className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-cinzel font-bold tracking-wider uppercase rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center gap-2 shadow-lg shadow-rose-950/50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isDeletingUser ? 'Deleting...' : 'Yes, Delete User'}</span>
               </button>
             </div>
           </div>

@@ -17,6 +17,7 @@ import {
   Bell,
   AlertCircle,
   ArrowLeft,
+  MapPin,
 } from 'lucide-react';
 
 interface AccountViewProps {
@@ -42,6 +43,9 @@ export const AccountView: React.FC<AccountViewProps> = ({ onBackToSite, onNaviga
   const [shortBio, setShortBio] = useState(profile?.shortBio || '');
   const [photoURL, setPhotoURL] = useState(profile?.photoURL || '');
   const [newsletterSubscribed, setNewsletterSubscribed] = useState(!!profile?.newsletterSubscribed);
+  const [city, setCity] = useState(profile?.city || '');
+  const [stateRegion, setStateRegion] = useState(profile?.state || '');
+  const [country, setCountry] = useState(profile?.country || '');
 
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -58,6 +62,9 @@ export const AccountView: React.FC<AccountViewProps> = ({ onBackToSite, onNaviga
       setShortBio(profile.shortBio || '');
       setPhotoURL(profile.photoURL || '');
       setNewsletterSubscribed(!!profile.newsletterSubscribed);
+      setCity(profile.city || '');
+      setStateRegion(profile.state || '');
+      setCountry(profile.country || '');
     }
     if (user) {
       const comms = commentService.getUserComments(user.uid);
@@ -78,6 +85,9 @@ export const AccountView: React.FC<AccountViewProps> = ({ onBackToSite, onNaviga
       shortBio: shortBio.trim(),
       photoURL: photoURL.trim(),
       newsletterSubscribed,
+      city: city.trim(),
+      state: stateRegion.trim(),
+      country: country.trim(),
     });
 
     setSaving(false);
@@ -320,6 +330,63 @@ export const AccountView: React.FC<AccountViewProps> = ({ onBackToSite, onNaviga
                 placeholder="Share your favorite fantasy tropes, reading speed, or thoughts..."
                 className="w-full bg-[#151724] border border-[#2c2f44] focus:border-[#c5a059] focus:outline-none rounded-lg p-3 text-xs text-[#f5efeb] resize-none"
               />
+            </div>
+
+            {/* Optional Reader Location Information */}
+            <div className="pt-3 pb-2 space-y-3 border-t border-[#1e202e]">
+              <div className="space-y-1">
+                <div className="flex items-center gap-1.5 text-xs font-cinzel font-bold text-[#c5a059]">
+                  <MapPin className="w-3.5 h-3.5 text-[#c5a059]" />
+                  <span>Optional — Just for Matthew&apos;s Curiosity</span>
+                </div>
+                <blockquote className="text-[11px] text-[#a8a396] leading-relaxed italic border-l-2 border-[#c5a059]/40 pl-2.5 py-0.5">
+                  &ldquo;I&apos;d love to know where readers are discovering my books from! Sharing your city, state/province, and country is completely optional and is simply to satisfy my curiosity about where readers are joining me from. You can leave these fields blank if you&apos;d rather not share.&rdquo;
+                </blockquote>
+                <p className="text-[10px] text-[#736e63]">
+                  Completely voluntary. Leaving this blank has zero effect on your account or access to the site. Visible solely to the author. You may edit or remove your location at any time.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="text-[11px] font-cinzel text-[#8f897c] block mb-1">
+                    City <span className="text-[10px] lowercase text-[#6e695e]">(optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={city}
+                    onChange={(e) => setCity(e.target.value)}
+                    placeholder="e.g. Austin"
+                    className="w-full bg-[#151724] border border-[#2c2f44] focus:border-[#c5a059] focus:outline-none rounded-lg px-3 py-2 text-xs text-[#f5efeb]"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-cinzel text-[#8f897c] block mb-1">
+                    State / Province / Region <span className="text-[10px] lowercase text-[#6e695e]">(optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={stateRegion}
+                    onChange={(e) => setStateRegion(e.target.value)}
+                    placeholder="e.g. Texas"
+                    className="w-full bg-[#151724] border border-[#2c2f44] focus:border-[#c5a059] focus:outline-none rounded-lg px-3 py-2 text-xs text-[#f5efeb]"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-cinzel text-[#8f897c] block mb-1">
+                    Country <span className="text-[10px] lowercase text-[#6e695e]">(optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={country}
+                    onChange={(e) => setCountry(e.target.value)}
+                    placeholder="e.g. United States"
+                    className="w-full bg-[#151724] border border-[#2c2f44] focus:border-[#c5a059] focus:outline-none rounded-lg px-3 py-2 text-xs text-[#f5efeb]"
+                  />
+                </div>
+              </div>
             </div>
 
             {/* Newsletter Preference */}

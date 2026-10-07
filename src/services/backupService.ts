@@ -1,12 +1,16 @@
 import { db, auth, ADMIN_EMAIL } from './firebase';
 import { bookService, ManagedBook, ManagedSeries, AuditLogItem } from './bookService';
+import { storyService } from './storyService';
+import { newsService } from './newsService';
+import { galleryService } from './galleryService';
+import { characterLoreService } from './characterLoreService';
 import { commentService } from './commentService';
 import { messageService } from './messageService';
 import { siteContentService } from './siteContentService';
+import { siteSettingsService, SiteSettings } from './siteSettingsService';
 import { userService } from './userService';
 import { newsletterService } from './newsletterService';
 import { adminNewsletterService } from './adminNewsletterService';
-import { STORIES, NEWS_ARTICLES } from '../data/authorData';
 import {
   BookComment,
   CommentReport,
@@ -17,6 +21,9 @@ import {
   HomepageContent,
   Story,
   NewsArticle,
+  GalleryItem,
+  Character,
+  LoreEntry,
 } from '../types';
 
 export interface SiteBackupSummary {
@@ -24,6 +31,9 @@ export interface SiteBackupSummary {
   seriesCount: number;
   storiesCount: number;
   newsCount: number;
+  galleryCount: number;
+  charactersCount: number;
+  loreCount: number;
   subscribersCount: number;
   commentsCount: number;
   reportsCount: number;
@@ -48,7 +58,11 @@ export interface SiteBackupPayload {
     series: ManagedSeries[];
     stories: Story[];
     news: NewsArticle[];
+    gallery: GalleryItem[];
+    characters: Character[];
+    lore: LoreEntry[];
     siteContent: HomepageContent;
+    siteSettings?: SiteSettings;
     newsletterSettings: NewsletterSettings;
     subscribers: NewsletterSubscriber[];
     comments: BookComment[];
@@ -90,12 +104,16 @@ class BackupService {
     const series = await bookService.getSeries();
     const auditLogs = await bookService.getAuditLogs();
 
-    // 2. Stories & News
-    const stories: Story[] = [...STORIES];
-    const news: NewsArticle[] = [...NEWS_ARTICLES];
+    // 2. Stories, News, Gallery, Characters & Lore
+    const stories: Story[] = await storyService.getStories();
+    const news: NewsArticle[] = await newsService.getAllArticles();
+    const gallery: GalleryItem[] = await galleryService.getAllItems();
+    const characters: Character[] = await characterLoreService.getAllCharacters();
+    const lore: LoreEntry[] = await characterLoreService.getAllLore();
 
-    // 3. Site Content
+    // 3. Site Content & Global Site Settings
     const siteContent = siteContentService.getContent();
+    const siteSettings = siteSettingsService.getSettings();
 
     // 4. Newsletter
     const subscribers = newsletterService.getSubscribers();
@@ -137,6 +155,9 @@ class BackupService {
       seriesCount: series.length,
       storiesCount: stories.length,
       newsCount: news.length,
+      galleryCount: gallery.length,
+      charactersCount: characters.length,
+      loreCount: lore.length,
       subscribersCount: subscribers.length,
       commentsCount: comments.length,
       reportsCount: commentReports.length,
@@ -161,7 +182,11 @@ class BackupService {
         series,
         stories,
         news,
+        gallery,
+        characters,
+        lore,
         siteContent,
+        siteSettings,
         newsletterSettings,
         subscribers,
         comments,

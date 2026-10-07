@@ -1,10 +1,10 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Book } from '../types';
-import { BOOKS } from '../data/authorData';
+import { bookService, managedBookToBook } from '../services/bookService';
 import { BookCoverArt } from '../components/BookCoverArt';
 import { NewsletterSignup } from '../components/NewsletterSignup';
 import { useSEO } from '../hooks/useSEO';
-import { Flame, BookOpen, Sparkles, Shield, Bookmark, ArrowRight } from 'lucide-react';
+import { Flame, BookOpen, Sparkles, Shield, Bookmark, ArrowRight, Layers } from 'lucide-react';
 
 interface IgnisKorViewProps {
   onOpenExcerpt: (book: Book) => void;
@@ -19,7 +19,62 @@ export const IgnisKorView: React.FC<IgnisKorViewProps> = ({
 }) => {
   useSEO('ignis-kor');
 
-  const book = BOOKS.find((b) => b.id === 'ignis-kor') || BOOKS[4];
+  const [book, setBook] = useState<Book | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+
+  useEffect(() => {
+    const loadBook = async () => {
+      try {
+        const found = await bookService.getBookById('ignis-kor');
+        if (found) {
+          setBook(managedBookToBook(found));
+        } else {
+          setBook(null);
+        }
+      } catch (err) {
+        console.warn('Error loading ignis-kor from database:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadBook();
+    const unsub = bookService.subscribe(loadBook);
+    return () => unsub();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 text-center space-y-4">
+        <div className="w-12 h-12 rounded-xl bg-[#ea580c]/10 border border-[#ea580c]/30 text-[#ea580c] flex items-center justify-center mx-auto animate-pulse">
+          <Flame className="w-6 h-6" />
+        </div>
+        <p className="text-xs font-cinzel text-[#8e887a]">Opening chronicle...</p>
+      </div>
+    );
+  }
+
+  if (!book) {
+    return (
+      <div className="max-w-4xl mx-auto px-4 py-20 text-center space-y-6">
+        <div className="w-12 h-12 rounded-xl bg-[#ea580c]/10 border border-[#ea580c]/30 text-[#ea580c] flex items-center justify-center mx-auto">
+          <Layers className="w-6 h-6" />
+        </div>
+        <h2 className="text-2xl font-cinzel font-bold text-[#f5efeb]">Novella Not Available</h2>
+        <p className="text-xs text-[#8e887a] max-w-md mx-auto">
+          This volume may have been archived or removed from the catalog.
+        </p>
+        <button
+          onClick={() => setActiveTab('books')}
+          className="px-5 py-2.5 bg-[#c5a059] text-[#0c0d12] text-xs font-cinzel font-bold uppercase rounded-lg cursor-pointer"
+        >
+          Return to Books Catalog
+        </button>
+      </div>
+    );
+  }
+
+  const quote = book.quote || { text: 'Where embers refuse to die, an ancient forge reawakens.', attribution: 'Ignis-Kor' };
+  const excerpt = book.excerpt || { chapterTitle: 'Prologue', text: ['Excerpt coming soon.'] };
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 space-y-16">
@@ -29,30 +84,30 @@ export const IgnisKorView: React.FC<IgnisKorViewProps> = ({
         <div className="lg:col-span-7 space-y-6">
           <div className="inline-flex items-center gap-2 px-3 py-1 bg-[#ea580c]/10 border border-[#ea580c]/30 rounded-full text-xs font-cinzel text-[#ea580c] uppercase tracking-wider">
             <Flame className="w-3.5 h-3.5" />
-            <span>The Breathwoven Universe Novella</span>
+            <span>{book.series || 'The Breathwoven Universe'} · Novella</span>
           </div>
 
           <div>
             <h1 className="text-3xl sm:text-4xl lg:text-5xl font-cinzel font-bold text-[#f5efeb] tracking-tight leading-tight">
-              Ignis-Kor: The Heart of Fire
+              {book.title}
             </h1>
             <p className="text-lg sm:text-xl font-cormorant italic text-[#ea580c] mt-2 font-medium">
-              "{book.tagline}"
+              "{book.tagline || book.subtitle || 'Where embers refuse to die, an ancient forge reawakens.'}"
             </p>
           </div>
 
           <div className="space-y-4 text-sm text-[#b2aca0] leading-relaxed">
-            <p>{book.synopsis}</p>
+            <p>{book.synopsis || book.description}</p>
             <p>
-              Before the Great Solstice, the flame-weavers served as guardians of thermal equilibrium. In this standalone novella, author Matthew E. Messmer delves into the molten core of Mount Ignis-Kor, examining how family heritage and stubborn courage survive in the darkest volcanic depths.
+              Before the Great Solstice, the flame-weavers served as guardians of thermal equilibrium. In this novella, author Matthew E. Messmer delves into the molten core of Mount Ignis-Kor, examining how family heritage and stubborn courage survive in the darkest volcanic depths.
             </p>
           </div>
 
           {/* Quote Block */}
           <blockquote className="border-l-2 border-[#ea580c] pl-4 py-1 italic font-cormorant text-lg text-[#ded8cb]">
-            "{book.quote.text}"
+            "{quote.text}"
             <footer className="text-xs text-[#8f897c] font-cinzel not-italic mt-1">
-              — {book.quote.attribution}
+              — {quote.attribution}
             </footer>
           </blockquote>
 
@@ -79,72 +134,78 @@ export const IgnisKorView: React.FC<IgnisKorViewProps> = ({
           </div>
         </div>
 
-        {/* Right: Book Cover & Physical Artifact Note */}
-        <div className="lg:col-span-5 flex flex-col items-center">
-          <div className="w-full max-w-sm rounded-xl overflow-hidden shadow-2xl border border-[#2b2e3f] bg-[#12141d] p-6 space-y-4">
-            <div className="aspect-[3/4] w-full rounded-lg overflow-hidden border border-[#36384a]">
-              <BookCoverArt book={book} size="lg" />
-            </div>
-
-            <div className="space-y-2 text-xs text-[#a39e90]">
-              <div className="flex justify-between border-b border-[#212332] pb-1">
-                <span>Release Status:</span>
-                <span className="text-[#ea580c] font-semibold uppercase">Forthcoming / In-Progress</span>
-              </div>
-              <div className="flex justify-between border-b border-[#212332] pb-1">
-                <span>Format:</span>
-                <span>Hardcover, Paperback, Ebook</span>
-              </div>
-              <div className="flex justify-between border-b border-[#212332] pb-1">
-                <span>Publisher:</span>
-                <span>Breathwoven Press</span>
-              </div>
-              {book.woodEngravingNote && (
-                <div className="pt-2 text-[11px] text-[#c5a059] italic">
-                  ★ Workshop Note: {book.woodEngravingNote}
-                </div>
-              )}
+        {/* Right: Book Cover */}
+        <div className="lg:col-span-5 flex justify-center">
+          <div className="w-full max-w-sm rounded-xl overflow-hidden shadow-2xl border border-[#3b2a24] bg-[#140f0c] p-6 relative group">
+            <div className="absolute inset-0 bg-[#ea580c]/10 blur-xl rounded-lg group-hover:bg-[#ea580c]/20 transition-all pointer-events-none" />
+            <div className="aspect-[2/3] w-full rounded-lg overflow-hidden border border-[#523326] relative z-10">
+              <BookCoverArt book={book} className="w-full h-full" />
             </div>
           </div>
         </div>
       </div>
 
-      {/* Excerpt Preview Box */}
-      <div className="bg-[#11131c] border border-[#282a3c] rounded-2xl p-6 sm:p-8 space-y-4">
-        <div className="flex items-center justify-between border-b border-[#212334] pb-4">
-          <div>
-            <span className="text-xs uppercase font-cinzel tracking-widest text-[#ea580c] font-semibold">
-              Preview Reading
-            </span>
-            <h3 className="text-xl font-cinzel font-bold text-[#f5efeb] mt-0.5">
-              {book.excerpt.chapterTitle}
-            </h3>
+      {/* Worldbuilding & Craft Lore Section */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="bg-[#14100e] border border-[#38261e] p-6 rounded-xl space-y-3">
+          <div className="w-10 h-10 rounded-lg bg-[#ea580c]/15 flex items-center justify-center text-[#ea580c]">
+            <Flame className="w-5 h-5" />
           </div>
-          <button
-            onClick={() => onOpenExcerpt(book)}
-            className="text-xs text-[#ea580c] hover:underline font-cinzel cursor-pointer"
-          >
-            Launch Fullscreen Reader →
-          </button>
+          <h3 className="font-cinzel font-bold text-[#f5efeb] text-base">Pyric Weaving</h3>
+          <p className="text-xs text-[#a69992] leading-relaxed">
+            Unlike the gold threads of the high realm, pyric weaving utilizes incandescent obsidian fibers that hold heat even beneath crushing ice.
+          </p>
         </div>
 
-        <div className="space-y-3 font-serif text-sm sm:text-base text-[#c9c4b7] leading-relaxed max-w-3xl">
-          {book.excerpt.text.slice(0, 3).map((para, idx) => (
-            <p key={idx}>{para}</p>
+        <div className="bg-[#14100e] border border-[#38261e] p-6 rounded-xl space-y-3">
+          <div className="w-10 h-10 rounded-lg bg-[#c5a059]/15 flex items-center justify-center text-[#c5a059]">
+            <Shield className="w-5 h-5" />
+          </div>
+          <h3 className="font-cinzel font-bold text-[#f5efeb] text-base">The Hearthkeep</h3>
+          <p className="text-xs text-[#a69992] leading-relaxed">
+            The subterranean bastion where refugees sheltered during the initial severance, guarded by four families bound in blood and oath.
+          </p>
+        </div>
+
+        <div className="bg-[#14100e] border border-[#38261e] p-6 rounded-xl space-y-3">
+          <div className="w-10 h-10 rounded-lg bg-[#3b82f6]/15 flex items-center justify-center text-[#3b82f6]">
+            <Bookmark className="w-5 h-5" />
+          </div>
+          <h3 className="font-cinzel font-bold text-[#f5efeb] text-base">Woodcut Artifacts</h3>
+          <p className="text-xs text-[#a69992] leading-relaxed">
+            Inspired by Matthew's physical laser engraving work, every seal and map of Mount Ignis-Kor has been laser-cut in layered Texas birch.
+          </p>
+        </div>
+      </div>
+
+      {/* Excerpt Section */}
+      <div className="bg-[#120f0d] border border-[#36261e] rounded-2xl p-8 sm:p-12 space-y-6 max-w-4xl mx-auto">
+        <div className="text-center pb-4 border-b border-[#36261e]">
+          <p className="text-xs uppercase font-cinzel tracking-widest text-[#ea580c] font-semibold mb-1">
+            Opening Passage
+          </p>
+          <h3 className="text-2xl font-cinzel font-bold text-[#f5efeb]">
+            {excerpt.chapterTitle}
+          </h3>
+        </div>
+
+        <div className="font-reading text-sm sm:text-base text-[#d1c7c0] leading-relaxed space-y-4">
+          {excerpt.text.map((para, i) => (
+            <p key={i} className={i === 0 ? 'drop-cap-lead' : ''}>
+              {para}
+            </p>
           ))}
         </div>
       </div>
 
-      {/* Dedicated Newsletter for Ignis-Kor */}
-      <div className="bg-[#12141f] border border-[#2a2d40] rounded-2xl p-8 max-w-2xl mx-auto">
+      {/* Newsletter Section */}
+      <div className="max-w-3xl mx-auto pt-6">
         <NewsletterSignup
           variant="book_page"
-          heading="Join the Forge List"
-          text="Receive private advance chapters, preview cover art reveals, and notification when Ignis-Kor limited hardcover editions open."
-          buttonText="Register for Ignis-Kor"
+          heading="Want to Follow the Fire?"
+          text="Join the newsletter for future dispatches, woodcut reveals, and lore updates from Ignis-Kor and The Breathwoven Universe."
+          buttonText="Join the Hearth"
           source="ignis_kor_page"
-          showFirstName={true}
-          showConsent={true}
           onOpenPrivacy={onOpenPrivacy}
         />
       </div>
