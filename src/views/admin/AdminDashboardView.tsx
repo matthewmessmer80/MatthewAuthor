@@ -268,7 +268,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
     { id: 'newsletter', label: 'Newsletter', icon: Mail },
     { id: 'seo', label: 'SEO', icon: Search },
     { id: 'settings', label: 'Site Settings', icon: Settings },
-    { id: 'backup', label: 'Site Backup', icon: Download },
+    { id: 'backup', label: 'Backup & Restore', icon: Download },
     { id: 'account', label: 'Account Profile', icon: User },
   ];
 
@@ -794,17 +794,17 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                         </div>
                         <div>
                           <div className="text-xs font-cinzel font-bold text-[#f5efeb] flex items-center gap-2">
-                            <span>Author Site Backup & Data Preservation</span>
+                            <span>Admin Backup & Restore Panel</span>
                             <span className="px-1.5 py-0.5 bg-[#c5a059]/20 text-[#c5a059] rounded text-[9px] font-mono">JSON</span>
                           </div>
                           <p className="text-[11px] text-[#8e887a] mt-0.5">
-                            Download a full offline archive of all books, series, discussions, subscribers, and settings "just in case".
+                            Export full JSON database backups or restore collections with safe Firestore batched writes.
                           </p>
                         </div>
                       </div>
 
                       <div className="flex items-center gap-1.5 text-xs font-cinzel text-[#c5a059] group-hover:translate-x-1 transition-transform self-end sm:self-auto shrink-0">
-                        <span>Open Backup Tool</span>
+                        <span>Open Backup & Restore</span>
                         <ArrowRight className="w-3.5 h-3.5" />
                       </div>
                     </div>

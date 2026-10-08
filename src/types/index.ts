@@ -588,6 +588,9 @@ export interface Song {
   soundcloudUrl?: string;
   bandcampUrl?: string;
   releaseNote?: string; // Backwards compatibility for dedication note display
+  storagePath?: string; // Firebase storage location
+  fileSize?: number; // Size in bytes
+  duration?: number; // Duration in seconds
   createdAt?: string;
   updatedAt?: string;
   createdBy?: string;

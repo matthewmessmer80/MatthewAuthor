@@ -59,7 +59,9 @@ export const db: Firestore = rawConfig.firestoreDatabaseId && rawConfig.firestor
   ? getFirestore(app, rawConfig.firestoreDatabaseId)
   : getFirestore(app);
 
-export const storage: FirebaseStorage = getStorage(app);
+export const storage: FirebaseStorage = firebaseConfig.storageBucket
+  ? getStorage(app, `gs://${firebaseConfig.storageBucket.replace(/^gs:\/\//, '')}`)
+  : getStorage(app);
 
 export const ADMIN_EMAIL = env.VITE_ADMIN_EMAIL || 'memauthor1980@gmail.com';
 export const AUTHOR_ADMIN_EMAILS = [

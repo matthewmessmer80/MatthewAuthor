@@ -231,8 +231,8 @@ service cloud.firestore {
     // Songs & Music Library
     match /songs/{songId} {
       allow read: if true;
-      allow update: if isEditor();
-      allow create, delete: if isAuthor();
+      allow create, update: if isEditor();
+      allow delete: if isAuthor();
     }
   }
 }

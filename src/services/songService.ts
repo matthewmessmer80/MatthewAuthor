@@ -7,9 +7,67 @@ import {
   onSnapshot,
   serverTimestamp,
 } from 'firebase/firestore';
-import { db, auth } from './firebase';
+import {
+  ref,
+  uploadBytesResumable,
+  getDownloadURL,
+  deleteObject,
+} from 'firebase/storage';
+import { db, auth, storage } from './firebase';
 import { Song, SongStatus, SongExternalLink } from '../types';
 import { optimizeCoverImage } from '../utils/imageOptimizer';
+
+export interface AudioUploadProgress {
+  bytesTransferred: number;
+  totalBytes: number;
+  progressPercent: number;
+  state: 'running' | 'paused' | 'success' | 'error';
+}
+
+export interface AudioUploadResult {
+  downloadUrl: string;
+  storagePath: string;
+  fileSize: number;
+  duration?: number;
+}
+
+export const ALLOWED_AUDIO_MIME_TYPES = [
+  'audio/mpeg',
+  'audio/mp3',
+  'audio/wav',
+  'audio/x-wav',
+  'audio/wave',
+  'audio/ogg',
+  'audio/aac',
+  'audio/x-m4a',
+  'audio/m4a',
+  'audio/flac',
+];
+
+export const ALLOWED_AUDIO_EXTENSIONS = ['.mp3', '.wav', '.ogg', '.aac', '.m4a', '.flac'];
+export const MAX_AUDIO_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+
+export function parseStorageError(err: any): string {
+  const code = err?.code || '';
+  switch (code) {
+    case 'storage/unauthorized':
+      return 'Storage unauthorized (storage/unauthorized): You do not have permission to upload audio files. Ensure you are signed in as Author.';
+    case 'storage/canceled':
+      return 'Upload was canceled by the user (storage/canceled).';
+    case 'storage/quota-exceeded':
+      return 'Storage quota exceeded (storage/quota-exceeded): The Firebase project storage limit has been reached.';
+    case 'storage/retry-limit-exceeded':
+      return 'Network timeout (storage/retry-limit-exceeded): The upload took too long or connection was interrupted. Please check your network and retry.';
+    case 'storage/invalid-checksum':
+      return 'File integrity check failed (storage/invalid-checksum). Please try uploading the file again.';
+    case 'storage/bucket-not-found':
+      return 'Storage bucket not configured (storage/bucket-not-found). Please check Firebase storage settings.';
+    case 'storage/project-not-found':
+      return 'Firebase project not found (storage/project-not-found).';
+    default:
+      return err?.message || 'Audio file upload failed due to a storage error.';
+  }
+}
 
 const SONGS_COLLECTION = 'songs';
 const STORAGE_KEY_SONGS = 'mem_songs_library_cache_v1';
@@ -409,13 +467,182 @@ class SongService {
     }
   }
 
-  public async uploadAudioFile(file: File): Promise<string> {
-    return new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (e) => resolve(e.target?.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
+  public validateAudioFile(file: File): { valid: boolean; error?: string } {
+    if (!file) {
+      return { valid: false, error: 'No audio file was selected.' };
+    }
+
+    const mimeType = (file.type || '').toLowerCase();
+    const nameLower = (file.name || '').toLowerCase();
+    const hasValidExt = ALLOWED_AUDIO_EXTENSIONS.some((ext) => nameLower.endsWith(ext));
+    const hasValidMime = ALLOWED_AUDIO_MIME_TYPES.includes(mimeType) || mimeType.startsWith('audio/');
+
+    if (!hasValidExt && !hasValidMime) {
+      return {
+        valid: false,
+        error: `Unsupported audio format "${file.type || file.name}". Please select an MP3, WAV, OGG, AAC, or M4A file.`,
+      };
+    }
+
+    if (file.size > MAX_AUDIO_FILE_SIZE) {
+      const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
+      return {
+        valid: false,
+        error: `File exceeds maximum allowed size of 50 MB (selected file is ${sizeMB} MB).`,
+      };
+    }
+
+    return { valid: true };
+  }
+
+  public async uploadAudioFileResumable(
+    file: File,
+    options?: {
+      songId?: string;
+      onProgress?: (progress: AudioUploadProgress) => void;
+    }
+  ): Promise<AudioUploadResult> {
+    const validation = this.validateAudioFile(file);
+    if (!validation.valid) {
+      throw new Error(validation.error);
+    }
+
+    // Try extracting audio duration
+    let duration: number | undefined;
+    try {
+      if (typeof window !== 'undefined' && window.Audio) {
+        const objectUrl = URL.createObjectURL(file);
+        const audioElem = new Audio(objectUrl);
+        duration = await new Promise<number | undefined>((res) => {
+          const timer = setTimeout(() => {
+            URL.revokeObjectURL(objectUrl);
+            res(undefined);
+          }, 3500);
+
+          audioElem.onloadedmetadata = () => {
+            clearTimeout(timer);
+            const d = Math.round(audioElem.duration);
+            URL.revokeObjectURL(objectUrl);
+            res(!isNaN(d) && isFinite(d) ? d : undefined);
+          };
+
+          audioElem.onerror = () => {
+            clearTimeout(timer);
+            URL.revokeObjectURL(objectUrl);
+            res(undefined);
+          };
+        });
+      }
+    } catch {
+      duration = undefined;
+    }
+
+    const cleanFilename = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const storagePath = `songs/${Date.now()}-${cleanFilename}`;
+    const storageRef = ref(storage, storagePath);
+
+    return new Promise<AudioUploadResult>((resolve, reject) => {
+      try {
+        const uploadTask = uploadBytesResumable(storageRef, file, {
+          contentType: file.type || 'audio/mpeg',
+          customMetadata: {
+            originalName: file.name,
+            fileSize: String(file.size),
+            duration: duration ? String(duration) : '',
+            uploadedBy: auth.currentUser?.email || 'author',
+          },
+        });
+
+        uploadTask.on(
+          'state_changed',
+          (snapshot) => {
+            const bytesTransferred = snapshot.bytesTransferred;
+            const totalBytes = snapshot.totalBytes;
+            const progressPercent = totalBytes > 0 ? Math.round((bytesTransferred / totalBytes) * 100) : 0;
+            options?.onProgress?.({
+              bytesTransferred,
+              totalBytes,
+              progressPercent,
+              state: snapshot.state as any,
+            });
+          },
+          (storageErr) => {
+            const formattedMsg = parseStorageError(storageErr);
+            const err = new Error(formattedMsg);
+            (err as any).code = storageErr.code;
+            reject(err);
+          },
+          async () => {
+            try {
+              const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
+              options?.onProgress?.({
+                bytesTransferred: file.size,
+                totalBytes: file.size,
+                progressPercent: 100,
+                state: 'success',
+              });
+              resolve({
+                downloadUrl,
+                storagePath,
+                fileSize: file.size,
+                duration,
+              });
+            } catch (err: any) {
+              reject(new Error(parseStorageError(err)));
+            }
+          }
+        );
+      } catch (err: any) {
+        reject(new Error(parseStorageError(err)));
+      }
     });
+  }
+
+  public async createTrackFromUpload(
+    file: File,
+    metadata?: {
+      title?: string;
+      artist?: string;
+      category?: string;
+      description?: string;
+      status?: SongStatus;
+    },
+    onProgress?: (progress: AudioUploadProgress) => void
+  ): Promise<Song> {
+    const uploadResult = await this.uploadAudioFileResumable(file, { onProgress });
+
+    const rawTitle = file.name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
+    const title = metadata?.title?.trim() || rawTitle || 'Untitled Track';
+    const artist = metadata?.artist?.trim() || 'Matthew E. Messmer';
+
+    const newTrack: Partial<Song> = {
+      title,
+      artist,
+      category: metadata?.category || 'Soundtrack Companion',
+      description: metadata?.description || `Audio track uploaded to vault: ${file.name}`,
+      audioUrl: uploadResult.downloadUrl,
+      storagePath: uploadResult.storagePath,
+      fileSize: uploadResult.fileSize,
+      duration: uploadResult.duration,
+      status: metadata?.status || 'Draft',
+      isPublic: true,
+      featured: false,
+    };
+
+    const saved = await this.saveSong(newTrack);
+    return saved;
+  }
+
+  public async uploadAudioFile(
+    file: File,
+    onProgress?: (progress: AudioUploadProgress) => void
+  ): Promise<string> {
+    const res = await this.uploadAudioFileResumable(file, { onProgress });
+    return res.downloadUrl;
+  }
+
+  public async forceRefresh(): Promise<Song[]> {
+    return this.getSongs();
   }
 }
 

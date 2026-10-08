@@ -277,9 +277,8 @@ export const AdminSettingsView: React.FC = () => {
     if (!isAuthor) return;
     setBackupLoading(true);
     try {
-      const payload = await backupService.generateCompleteBackup(role, user?.email || undefined);
-      backupService.triggerFileDownload(payload);
-      setBackupSuccess('Site backup successfully generated and downloaded.');
+      await backupService.exportFullBackupJSON(role, user?.email || undefined);
+      setBackupSuccess('Site backup successfully generated and downloaded as backup-[timestamp].json.');
       setTimeout(() => setBackupSuccess(null), 4000);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to generate backup.';
