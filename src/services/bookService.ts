@@ -1080,6 +1080,15 @@ class BookService {
     this.books = this.books.filter((b) => b.id !== id);
     this.notify();
 
+    // Safely unassign attached songs from deleted book
+    try {
+      import('./songService').then(({ songService }) => {
+        songService.handleBookDeleted(id);
+      });
+    } catch {
+      // ignore
+    }
+
     await this.logAudit({
       action: 'Book Deleted Permanently',
       targetId: id,
@@ -1477,6 +1486,15 @@ class BookService {
 
     this.series = this.series.filter((s) => s.id !== seriesId);
     this.notify();
+
+    // Safely unassign attached songs and preserve them in Audio Vault as standalone
+    try {
+      import('./songService').then(({ songService }) => {
+        songService.handleSeriesDeleted(seriesId);
+      });
+    } catch {
+      // ignore
+    }
 
     await this.logAudit({
       action: 'Series Deleted',

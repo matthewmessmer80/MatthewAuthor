@@ -4,6 +4,7 @@ import { ManagedSeries, ManagedBook, bookService, managedBookToBook } from '../s
 import { Book } from '../types';
 import { BookCard } from '../components/BookCard';
 import { BookCoverArt } from '../components/BookCoverArt';
+import { CompanionSongsSection } from '../components/CompanionSongsSection';
 import { useSEO } from '../hooks/useSEO';
 import {
   Layers,
@@ -372,6 +373,14 @@ export const SeriesPageView: React.FC<SeriesPageViewProps> = ({
             })}
           </div>
         )}
+
+        {/* Companion Soundtracks & Music for this Series */}
+        <CompanionSongsSection
+          seriesId={series.id}
+          seriesSlug={series.slug}
+          seriesName={series.name}
+          className="pt-10 border-t border-[#232635]"
+        />
       </div>
     </div>
   );

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Book } from '../types';
 import { bookService, managedBookToBook } from '../services/bookService';
 import { BookCoverArt } from '../components/BookCoverArt';
+import { CompanionSongsSection } from '../components/CompanionSongsSection';
 import { NewsletterSignup } from '../components/NewsletterSignup';
 import { useSEO } from '../hooks/useSEO';
 import { Flame, BookOpen, Sparkles, Shield, Bookmark, ArrowRight, Layers } from 'lucide-react';
@@ -197,6 +198,16 @@ export const IgnisKorView: React.FC<IgnisKorViewProps> = ({
           ))}
         </div>
       </div>
+
+      {/* Companion Soundtracks for Ignis-Kor */}
+      {book && (
+        <CompanionSongsSection
+          bookId={book.id}
+          bookTitle={book.title}
+          seriesId={book.seriesId}
+          seriesName={book.seriesName || book.series}
+        />
+      )}
 
       {/* Newsletter Section */}
       <div className="max-w-3xl mx-auto pt-6">

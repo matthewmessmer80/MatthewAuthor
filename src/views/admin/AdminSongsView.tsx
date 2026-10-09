@@ -29,9 +29,12 @@ import {
   List,
   Grid,
   Loader2,
+  BookOpen,
+  Layers,
 } from 'lucide-react';
 import { Song, SongStatus, SongExternalLink } from '../../types';
 import { songService } from '../../services/songService';
+import { bookService, ManagedSeries, ManagedBook } from '../../services/bookService';
 import { useAuth } from '../../context/AuthContext';
 
 const PREDEFINED_CATEGORIES = [
@@ -47,12 +50,15 @@ const PREDEFINED_CATEGORIES = [
 export const AdminSongsView: React.FC = () => {
   const { isAuthor } = useAuth();
   const [songs, setSongs] = useState<Song[]>([]);
+  const [seriesList, setSeriesList] = useState<ManagedSeries[]>([]);
+  const [allBooks, setAllBooks] = useState<ManagedBook[]>([]);
   const [loading, setLoading] = useState(true);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Filters & layout
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
+  const [seriesFilter, setSeriesFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState<'ALL' | SongStatus>('ALL');
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
 
@@ -90,8 +96,44 @@ export const AdminSongsView: React.FC = () => {
       setSongs(list);
     });
 
-    return () => unsub();
+    const fetchBooksAndSeries = async () => {
+      try {
+        const s = await bookService.getSeries();
+        const b = await bookService.getBooks();
+        setSeriesList(s);
+        setAllBooks(b);
+      } catch (err) {
+        console.warn('Failed to load series/books for song editor:', err);
+      }
+    };
+    fetchBooksAndSeries();
+    const unsubBooks = bookService.subscribe(fetchBooksAndSeries);
+
+    return () => {
+      unsub();
+      unsubBooks();
+    };
   }, []);
+
+  // Filter books dynamically for the selected series
+  const availableBooksForSelectedSeries = React.useMemo(() => {
+    if (!editingSong?.seriesId) return [];
+    const targetSeries = seriesList.find((s) => s.id === editingSong.seriesId);
+    const filtered = allBooks.filter((b) => {
+      if (b.seriesId === editingSong.seriesId) return true;
+      if (targetSeries?.slug && (b.seriesId === targetSeries.slug || b.slug === targetSeries.slug)) return true;
+      if (targetSeries?.bookIds && targetSeries.bookIds.includes(b.id)) return true;
+      if (editingSong.seriesName && b.seriesName === editingSong.seriesName) return true;
+      return false;
+    });
+    // Sort books by seriesOrder
+    filtered.sort((a, b) => {
+      const orderA = a.seriesOrder ? Number(a.seriesOrder) : 999;
+      const orderB = b.seriesOrder ? Number(b.seriesOrder) : 999;
+      return orderA - orderB;
+    });
+    return filtered;
+  }, [editingSong?.seriesId, editingSong?.seriesName, allBooks, seriesList]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -103,6 +145,12 @@ export const AdminSongsView: React.FC = () => {
       title: '',
       artist: 'Matthew E. Messmer',
       category: 'Soundtrack Companion',
+      seriesId: '',
+      seriesName: '',
+      bookId: '',
+      bookTitle: '',
+      trackDescription: '',
+      storyBehindTrack: '',
       description: '',
       lyrics: '',
       dedication: '',
@@ -118,6 +166,7 @@ export const AdminSongsView: React.FC = () => {
       spotifyUrl: '',
       soundcloudUrl: '',
       bandcampUrl: '',
+      sunoUrl: '',
     });
     setIsEditorOpen(true);
   };
@@ -125,10 +174,20 @@ export const AdminSongsView: React.FC = () => {
   const handleOpenEditSong = (song: Song) => {
     setEditingSong({
       ...song,
-      youtubeUrl: song.youtubeUrl || song.externalLinks?.find((l) => l.platform === 'YouTube')?.url || '',
-      spotifyUrl: song.spotifyUrl || song.externalLinks?.find((l) => l.platform === 'Spotify')?.url || '',
-      soundcloudUrl: song.soundcloudUrl || song.externalLinks?.find((l) => l.platform === 'SoundCloud')?.url || '',
-      bandcampUrl: song.bandcampUrl || song.externalLinks?.find((l) => l.platform === 'Bandcamp')?.url || '',
+      seriesId: song.seriesId || '',
+      seriesName: song.seriesName || '',
+      bookId: song.bookId || '',
+      bookTitle: song.bookTitle || '',
+      trackDescription:
+        song.trackDescription !== undefined
+          ? song.trackDescription
+          : song.description || '',
+      storyBehindTrack: song.storyBehindTrack || '',
+      youtubeUrl: song.youtubeUrl || song.externalLinks?.find((l) => l.platform.toLowerCase() === 'youtube')?.url || '',
+      spotifyUrl: song.spotifyUrl || song.externalLinks?.find((l) => l.platform.toLowerCase() === 'spotify')?.url || '',
+      soundcloudUrl: song.soundcloudUrl || song.externalLinks?.find((l) => l.platform.toLowerCase() === 'soundcloud')?.url || '',
+      bandcampUrl: song.bandcampUrl || song.externalLinks?.find((l) => l.platform.toLowerCase() === 'bandcamp')?.url || '',
+      sunoUrl: song.sunoUrl || song.externalLinks?.find((l) => l.platform.toLowerCase() === 'suno')?.url || '',
     });
     setIsEditorOpen(true);
   };
@@ -142,7 +201,34 @@ export const AdminSongsView: React.FC = () => {
 
     setIsSaving(true);
     try {
-      const saved = await songService.saveSong(editingSong);
+      // Validate that book belongs to series
+      let finalBookId = editingSong.bookId || '';
+      let finalBookTitle = editingSong.bookTitle || '';
+      if (!editingSong.seriesId) {
+        finalBookId = '';
+        finalBookTitle = '';
+      } else if (finalBookId) {
+        const belongs = availableBooksForSelectedSeries.some((b) => b.id === finalBookId);
+        if (!belongs) {
+          finalBookId = '';
+          finalBookTitle = '';
+        }
+      }
+
+      const payload: Partial<Song> = {
+        ...editingSong,
+        seriesId: isAuthor ? (editingSong.seriesId || '') : editingSong.seriesId,
+        seriesName: isAuthor ? (editingSong.seriesName || '') : editingSong.seriesName,
+        bookId: isAuthor ? finalBookId : editingSong.bookId,
+        bookTitle: isAuthor ? finalBookTitle : editingSong.bookTitle,
+        trackDescription: editingSong.trackDescription !== undefined ? editingSong.trackDescription : '',
+        storyBehindTrack: editingSong.storyBehindTrack !== undefined ? editingSong.storyBehindTrack : '',
+        description:
+          editingSong.trackDescription !== undefined
+            ? editingSong.trackDescription
+            : editingSong.description || '',
+      };
+      const saved = await songService.saveSong(payload);
       showToast(`Song "${saved.title}" saved successfully (${saved.status}).`);
       setIsEditorOpen(false);
       setEditingSong(null);
@@ -317,8 +403,12 @@ export const AdminSongsView: React.FC = () => {
 
     const matchesCategory = categoryFilter === 'ALL' || s.category === categoryFilter;
     const matchesStatus = statusFilter === 'ALL' || s.status === statusFilter;
+    const matchesSeries =
+      seriesFilter === 'ALL' ||
+      (seriesFilter === 'STANDALONE' && (!s.seriesId || s.seriesId.trim() === '')) ||
+      s.seriesId === seriesFilter;
 
-    return matchesSearch && matchesCategory && matchesStatus;
+    return matchesSearch && matchesCategory && matchesStatus && matchesSeries;
   });
 
   const publishedCount = songs.filter((s) => s.status === 'Published').length;
@@ -489,6 +579,21 @@ export const AdminSongsView: React.FC = () => {
             ))}
           </select>
 
+          {/* Series filter */}
+          <select
+            value={seriesFilter}
+            onChange={(e) => setSeriesFilter(e.target.value)}
+            className="px-3 py-2 bg-[#0a0b10] border border-[#2b2e40] rounded-lg text-xs text-[#d4cfc2] focus:outline-none focus:border-[#c5a059]"
+          >
+            <option value="ALL">All Series</option>
+            <option value="STANDALONE">Standalone Songs (No Series)</option>
+            {seriesList.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+
           {/* View Mode Toggle */}
           <div className="flex items-center bg-[#0a0b10] border border-[#2b2e40] rounded-lg p-0.5">
             <button
@@ -640,9 +745,40 @@ export const AdminSongsView: React.FC = () => {
                       </div>
                     )}
 
-                    <p className="text-xs text-[#a8a396] line-clamp-2 leading-relaxed">
-                      {song.description || 'No description provided.'}
-                    </p>
+                    {/* Series & Book Association Badge */}
+                    {(() => {
+                      const displaySeries =
+                        seriesList.find((s) => s.id === song.seriesId)?.name ||
+                        song.seriesName;
+                      const displayBook =
+                        allBooks.find((b) => b.id === song.bookId)?.title ||
+                        song.bookTitle;
+                      if (!displaySeries) return null;
+                      return (
+                        <div className="flex items-center gap-1.5 text-[10px] font-cinzel text-[#c5a059] bg-[#c5a059]/10 border border-[#c5a059]/30 rounded-md px-2.5 py-1">
+                          <Layers className="w-3 h-3 text-[#c5a059] shrink-0" />
+                          <span className="truncate">
+                            Series: {displaySeries}
+                            {displayBook ? ` · ${displayBook}` : ''}
+                          </span>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Track Description */}
+                    {(song.trackDescription || song.description) && (
+                      <p className="text-xs text-[#a8a396] line-clamp-2 leading-relaxed">
+                        {song.trackDescription || song.description}
+                      </p>
+                    )}
+
+                    {/* Story Behind the Track badge/preview */}
+                    {song.storyBehindTrack && (
+                      <div className="p-2 bg-[#0d0f18] border border-[#232635] rounded-lg text-[11px] text-[#c5a059] flex items-center gap-1.5 font-cormorant italic">
+                        <BookOpen className="w-3.5 h-3.5 text-[#c5a059] shrink-0" />
+                        <span className="truncate">Story: {song.storyBehindTrack}</span>
+                      </div>
+                    )}
 
                     {/* External links pills */}
                     {song.externalLinks && song.externalLinks.length > 0 && (
@@ -742,6 +878,21 @@ export const AdminSongsView: React.FC = () => {
                         </div>
                         <div>
                           <div className="font-cinzel font-bold text-xs text-[#f5efeb]">{song.title}</div>
+                          {(() => {
+                            const displaySeries =
+                              seriesList.find((s) => s.id === song.seriesId)?.name ||
+                              song.seriesName;
+                            const displayBook =
+                              allBooks.find((b) => b.id === song.bookId)?.title ||
+                              song.bookTitle;
+                            if (!displaySeries) return null;
+                            return (
+                              <div className="text-[10px] text-[#c5a059] font-cinzel flex items-center gap-1">
+                                <Layers className="w-2.5 h-2.5" />
+                                <span>{displaySeries}{displayBook ? ` · ${displayBook}` : ''}</span>
+                              </div>
+                            );
+                          })()}
                           {song.dedication && (
                             <div className="text-[11px] text-rose-300 italic font-cormorant">
                               "{song.dedication}"
@@ -921,17 +1072,158 @@ export const AdminSongsView: React.FC = () => {
                 />
               </div>
 
-              {/* Description */}
+              {/* Literary Universe & Book Association */}
+              <div className="p-4 bg-[#0d0f18] border border-[#1f2231] rounded-xl space-y-4">
+                <div className="flex items-center justify-between border-b border-[#1c1e2b] pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <Layers className="w-4 h-4 text-[#c5a059]" />
+                    <span className="text-xs font-cinzel font-bold text-[#f5efeb] uppercase tracking-wider">
+                      Literary Universe & Book Association
+                    </span>
+                  </div>
+                  {!isAuthor && (
+                    <span className="text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded font-cinzel">
+                      Author Permission Required to Change
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* 1. Associated Book Series */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-cinzel font-semibold text-[#d4cfc2]">
+                      Associated Book Series
+                    </label>
+                    <select
+                      value={editingSong.seriesId || ''}
+                      disabled={!isAuthor}
+                      onChange={(e) => {
+                        const selectedId = e.target.value;
+                        if (!selectedId) {
+                          setEditingSong({
+                            ...editingSong,
+                            seriesId: '',
+                            seriesName: '',
+                            bookId: '',
+                            bookTitle: '',
+                          });
+                        } else {
+                          const found = seriesList.find((s) => s.id === selectedId);
+                          setEditingSong({
+                            ...editingSong,
+                            seriesId: selectedId,
+                            seriesName: found?.name || '',
+                            bookId: '',
+                            bookTitle: '',
+                          });
+                        }
+                      }}
+                      className="w-full px-3.5 py-2 bg-[#0a0b10] border border-[#2b2e40] rounded-lg text-xs text-[#f5efeb] focus:outline-none focus:border-[#c5a059] disabled:opacity-50"
+                    >
+                      <option value="">None — Standalone Song</option>
+                      {seriesList.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name} ({s.bookIds?.length || 0} books)
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[11px] text-[#8e887a] leading-tight">
+                      Dynamically populated from Firestore series. Automatically displays this song on the public series page.
+                    </p>
+                  </div>
+
+                  {/* 2. Associated Book (Optional) */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-cinzel font-semibold text-[#d4cfc2]">
+                      Associated Book (Optional)
+                    </label>
+                    <select
+                      value={editingSong.bookId || ''}
+                      disabled={!editingSong.seriesId || !isAuthor}
+                      onChange={(e) => {
+                        const selectedBookId = e.target.value;
+                        if (!selectedBookId) {
+                          setEditingSong({
+                            ...editingSong,
+                            bookId: '',
+                            bookTitle: '',
+                          });
+                        } else {
+                          const foundBook = availableBooksForSelectedSeries.find((b) => b.id === selectedBookId);
+                          setEditingSong({
+                            ...editingSong,
+                            bookId: selectedBookId,
+                            bookTitle: foundBook?.title || '',
+                          });
+                        }
+                      }}
+                      className="w-full px-3.5 py-2 bg-[#0a0b10] border border-[#2b2e40] rounded-lg text-xs text-[#f5efeb] focus:outline-none focus:border-[#c5a059] disabled:opacity-50"
+                    >
+                      <option value="">
+                        {editingSong.seriesId
+                          ? 'No specific book (Relates to entire series)'
+                          : 'Select a series first to choose a book'}
+                      </option>
+                      {availableBooksForSelectedSeries.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          Book {b.seriesOrder ? `${b.seriesOrder}: ` : ''}{b.title}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[11px] text-[#8e887a] leading-tight">
+                      {editingSong.seriesId
+                        ? 'Optionally pin this song to an individual book page within the selected series.'
+                        : 'Disabled until a book series is selected.'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* 1. Track Description */}
               <div className="space-y-1.5">
-                <label className="block text-xs font-cinzel font-semibold text-[#d4cfc2]">
-                  Description & Story Behind the Track
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-cinzel font-semibold text-[#d4cfc2]">
+                    Track Description
+                  </label>
+                  <span className="text-[11px] text-[#7d776a] font-normal">Optional</span>
+                </div>
+                <p className="text-[11px] text-[#8e887a] leading-tight">
+                  Describe the song's sound, musical style, mood, themes, and what listeners can expect.
+                </p>
                 <textarea
                   rows={3}
-                  value={editingSong.description || ''}
-                  onChange={(e) => setEditingSong({ ...editingSong, description: e.target.value })}
-                  placeholder="Describe the inspiration, narrative tie-in, or worldbuilding context..."
-                  className="w-full px-3.5 py-2 bg-[#0a0b10] border border-[#2b2e40] rounded-lg text-xs text-[#f5efeb] focus:outline-none focus:border-[#c5a059]"
+                  value={
+                    editingSong.trackDescription !== undefined
+                      ? editingSong.trackDescription
+                      : editingSong.description || ''
+                  }
+                  onChange={(e) =>
+                    setEditingSong({ ...editingSong, trackDescription: e.target.value })
+                  }
+                  placeholder="Describe the song's sound, musical style, mood, themes, and what listeners can expect..."
+                  className="w-full px-3.5 py-2.5 bg-[#0a0b10] border border-[#2b2e40] rounded-lg text-xs text-[#f5efeb] focus:outline-none focus:border-[#c5a059] leading-relaxed"
+                />
+              </div>
+
+              {/* 2. Story Behind the Track */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-cinzel font-semibold text-[#d4cfc2]">
+                    Story Behind the Track
+                  </label>
+                  <span className="text-[11px] text-[#7d776a] font-normal">Optional</span>
+                </div>
+                <p className="text-[11px] text-[#8e887a] leading-tight">
+                  Share the inspiration, meaning, creative process, or personal story behind this song.
+                </p>
+                <textarea
+                  rows={5}
+                  value={editingSong.storyBehindTrack || ''}
+                  onChange={(e) =>
+                    setEditingSong({ ...editingSong, storyBehindTrack: e.target.value })
+                  }
+                  placeholder="Share the inspiration, meaning, creative process, or personal story behind this song (multiple paragraphs supported)..."
+                  className="w-full px-3.5 py-2.5 bg-[#0a0b10] border border-[#2b2e40] rounded-lg text-xs text-[#f5efeb] focus:outline-none focus:border-[#c5a059] leading-relaxed whitespace-pre-wrap"
                 />
               </div>
 
@@ -1126,6 +1418,16 @@ export const AdminSongsView: React.FC = () => {
                       value={editingSong.bandcampUrl || ''}
                       onChange={(e) => setEditingSong({ ...editingSong, bandcampUrl: e.target.value })}
                       placeholder="https://matthewemessmer.bandcamp.com/..."
+                      className="w-full px-3 py-1.5 bg-[#0a0b10] border border-[#2b2e40] rounded text-[#f5efeb] focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-[#8e887a] block mb-1">Suno AI / Music Link</label>
+                    <input
+                      type="url"
+                      value={editingSong.sunoUrl || ''}
+                      onChange={(e) => setEditingSong({ ...editingSong, sunoUrl: e.target.value })}
+                      placeholder="https://suno.com/song/..."
                       className="w-full px-3 py-1.5 bg-[#0a0b10] border border-[#2b2e40] rounded text-[#f5efeb] focus:outline-none"
                     />
                   </div>

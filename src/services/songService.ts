@@ -16,6 +16,7 @@ import {
 import { db, auth, storage } from './firebase';
 import { Song, SongStatus, SongExternalLink } from '../types';
 import { optimizeCoverImage } from '../utils/imageOptimizer';
+import { bookService } from './bookService';
 
 export interface AudioUploadProgress {
   bytesTransferred: number;
@@ -80,7 +81,9 @@ export const INITIAL_SONGS: Song[] = [
     title: 'Different Roads, Same Family',
     artist: 'Matthew E. Messmer',
     category: 'Original Country & Acoustic',
-    description: 'An original track exploring shared roots, divergent paths, and family bonds.',
+    trackDescription: 'An original acoustic composition exploring shared roots, divergent paths, and family bonds with rustic fingerpicked guitars and warm vocal harmonies.',
+    storyBehindTrack: 'Written during quiet hours in the wood workshop, thinking about how different siblings and branches of a family can walk completely divergent paths across mountains and decades, yet find themselves grounded by the same heritage whenever their trails cross.',
+    description: 'An original acoustic composition exploring shared roots, divergent paths, and family bonds with rustic fingerpicked guitars and warm vocal harmonies.',
     lyrics: `Different roads, same dusty boots
 Traveling far from where we grew our roots
 Though miles and shadows stretch in between
@@ -112,6 +115,8 @@ Every trail leads home in the end.`,
     title: 'Some Family Finds You',
     artist: 'Matthew E. Messmer',
     category: 'Dedication Track',
+    trackDescription: 'A heartfelt acoustic tribute featuring contemplative steel-string guitar, evocative melodies, and reflective lyrics centered on resilience and emotional reconnection.',
+    storyBehindTrack: 'Dedicated with love to my sister Dawn — celebrating unbreakable bonds across time and distance. Conceived as an emotional testament to the quiet strength that pulls families through life\'s fiercest storms and long periods of physical separation.',
     description: 'A heartfelt tribute dedicated to my sister Dawn, celebrating resilience and reconnections.',
     dedication: 'Dedicated with love to my sister Dawn — celebrating unbreakable bonds across time and distance.',
     lyrics: `Some blood is born in the quiet light
@@ -251,12 +256,20 @@ class SongService {
           snapshot.forEach((d) => {
             if (deletedIds.has(d.id)) return;
             const data = d.data() as Partial<Song>;
+            const trackDesc = data.trackDescription !== undefined ? data.trackDescription : (data.description || '');
+            const storyTrack = data.storyBehindTrack !== undefined ? data.storyBehindTrack : '';
             list.push({
               id: d.id,
               title: data.title || 'Untitled Song',
               artist: data.artist || 'Matthew E. Messmer',
               category: data.category || 'Soundtrack Companion',
-              description: data.description || '',
+              seriesId: data.seriesId || '',
+              seriesName: data.seriesName || '',
+              bookId: data.bookId || '',
+              bookTitle: data.bookTitle || '',
+              trackDescription: trackDesc,
+              storyBehindTrack: storyTrack,
+              description: trackDesc || data.description || '',
               lyrics: data.lyrics || '',
               dedication: data.dedication || '',
               audioUrl: data.audioUrl || '',
@@ -272,6 +285,7 @@ class SongService {
               spotifyUrl: data.spotifyUrl || '',
               soundcloudUrl: data.soundcloudUrl || '',
               bandcampUrl: data.bandcampUrl || '',
+              sunoUrl: data.sunoUrl || '',
               releaseNote: data.dedication || data.releaseNote || '',
               createdAt: data.createdAt || new Date().toISOString(),
               updatedAt: data.updatedAt || new Date().toISOString(),
@@ -315,7 +329,21 @@ class SongService {
         const list: Song[] = [];
         snap.forEach((d) => {
           if (deletedIds.has(d.id)) return;
-          list.push({ ...(d.data() as Song), id: d.id });
+          const data = d.data() as Partial<Song>;
+          const trackDesc = data.trackDescription !== undefined ? data.trackDescription : (data.description || '');
+          const storyTrack = data.storyBehindTrack !== undefined ? data.storyBehindTrack : '';
+          list.push({
+            ...(data as Song),
+            id: d.id,
+            seriesId: data.seriesId || '',
+            seriesName: data.seriesName || '',
+            bookId: data.bookId || '',
+            bookTitle: data.bookTitle || '',
+            sunoUrl: data.sunoUrl || '',
+            trackDescription: trackDesc,
+            storyBehindTrack: storyTrack,
+            description: trackDesc || data.description || '',
+          });
         });
         list.sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
         this.songs = list;
@@ -341,22 +369,69 @@ class SongService {
     const sp = songData.spotifyUrl !== undefined ? songData.spotifyUrl : existing?.spotifyUrl;
     const sc = songData.soundcloudUrl !== undefined ? songData.soundcloudUrl : existing?.soundcloudUrl;
     const bc = songData.bandcampUrl !== undefined ? songData.bandcampUrl : existing?.bandcampUrl;
+    const su = songData.sunoUrl !== undefined ? songData.sunoUrl : existing?.sunoUrl;
 
     if (yt?.trim()) externalLinks.push({ platform: 'YouTube', url: yt.trim() });
     if (sp?.trim()) externalLinks.push({ platform: 'Spotify', url: sp.trim() });
     if (sc?.trim()) externalLinks.push({ platform: 'SoundCloud', url: sc.trim() });
     if (bc?.trim()) externalLinks.push({ platform: 'Bandcamp', url: bc.trim() });
+    if (su?.trim()) externalLinks.push({ platform: 'Suno', url: su.trim() });
 
     // Explicit requirement: newly created songs default to 'Draft' unless author explicitly chose
     const defaultStatus: SongStatus = isNew ? 'Draft' : (existing?.status || 'Draft');
     const finalStatus: SongStatus = songData.status || defaultStatus;
+
+    const seriesId =
+      songData.seriesId !== undefined
+        ? songData.seriesId
+        : (existing?.seriesId || '');
+
+    const seriesName =
+      songData.seriesName !== undefined
+        ? songData.seriesName
+        : (existing?.seriesName || '');
+
+    const bookId =
+      songData.bookId !== undefined
+        ? songData.bookId
+        : (existing?.bookId || '');
+
+    const bookTitle =
+      songData.bookTitle !== undefined
+        ? songData.bookTitle
+        : (existing?.bookTitle || '');
+
+    const trackDescription =
+      songData.trackDescription !== undefined
+        ? songData.trackDescription
+        : existing?.trackDescription !== undefined
+        ? existing.trackDescription
+        : (existing?.description || '');
+
+    const storyBehindTrack =
+      songData.storyBehindTrack !== undefined
+        ? songData.storyBehindTrack
+        : (existing?.storyBehindTrack || '');
+
+    const description =
+      songData.trackDescription !== undefined
+        ? songData.trackDescription
+        : songData.description !== undefined
+        ? songData.description
+        : (existing?.description || '');
 
     const merged: Song = {
       id,
       title: songData.title?.trim() || existing?.title || 'Untitled Song',
       artist: songData.artist?.trim() || existing?.artist || 'Matthew E. Messmer',
       category: songData.category?.trim() || existing?.category || 'Soundtrack Companion',
-      description: songData.description !== undefined ? songData.description : (existing?.description || ''),
+      seriesId,
+      seriesName,
+      bookId,
+      bookTitle,
+      trackDescription,
+      storyBehindTrack,
+      description,
       lyrics: songData.lyrics !== undefined ? songData.lyrics : (existing?.lyrics || ''),
       dedication: songData.dedication !== undefined ? songData.dedication : (existing?.dedication || ''),
       audioUrl: songData.audioUrl !== undefined ? songData.audioUrl : (existing?.audioUrl || ''),
@@ -377,6 +452,7 @@ class SongService {
       spotifyUrl: sp || '',
       soundcloudUrl: sc || '',
       bandcampUrl: bc || '',
+      sunoUrl: su || '',
       releaseNote:
         songData.dedication !== undefined
           ? songData.dedication
@@ -406,6 +482,139 @@ class SongService {
     this.saveLocally();
     this.notify();
     return merged;
+  }
+
+  /**
+   * Returns all songs associated with a specific series (by stable document ID, slug, or title).
+   * Filtered by published status for public pages by default.
+   */
+  public getSongsForSeries(seriesIdOrSlug: string, includeUnpublished = false): Song[] {
+    if (!seriesIdOrSlug) return [];
+    const rawTarget = seriesIdOrSlug.toLowerCase().trim();
+    const cleanTarget = rawTarget.replace(/^\/series\//, '');
+
+    const cachedSeries = typeof bookService !== 'undefined' ? bookService.getCachedSeries() : [];
+    const matchedSeries = cachedSeries.find(
+      (cs) =>
+        cs.id.toLowerCase() === cleanTarget ||
+        cs.id.toLowerCase() === rawTarget ||
+        (cs.slug && cs.slug.toLowerCase().replace(/^\/series\//, '') === cleanTarget) ||
+        (cs.name && cs.name.toLowerCase() === cleanTarget)
+    );
+
+    return this.songs.filter((s) => {
+      const sId = (s.seriesId || '').toLowerCase().trim();
+      const sName = (s.seriesName || '').toLowerCase().trim();
+
+      let matches = false;
+      if (sId && (sId === cleanTarget || sId === rawTarget)) {
+        matches = true;
+      } else if (sName && (sName === cleanTarget || sName === rawTarget)) {
+        matches = true;
+      } else if (matchedSeries) {
+        if (sId && (sId === matchedSeries.id.toLowerCase() || (matchedSeries.slug && sId === matchedSeries.slug.toLowerCase().replace(/^\/series\//, '')))) {
+          matches = true;
+        } else if (sName && sName === matchedSeries.name.toLowerCase()) {
+          matches = true;
+        }
+      }
+
+      if (!matches) return false;
+      if (includeUnpublished) return true;
+      return s.status === 'Published' && s.isPublic !== false;
+    });
+  }
+
+  /**
+   * Returns all songs associated with an individual book (by stable book document ID, slug, or title).
+   */
+  public getSongsForBook(bookIdOrSlug: string, includeUnpublished = false): Song[] {
+    if (!bookIdOrSlug) return [];
+    const rawTarget = bookIdOrSlug.toLowerCase().trim();
+    const cleanTarget = rawTarget.replace(/^\/books?\//, '');
+
+    const cachedBooks = typeof bookService !== 'undefined' ? bookService.getCachedBooks() : [];
+    const matchedBook = cachedBooks.find(
+      (cb) =>
+        cb.id.toLowerCase() === cleanTarget ||
+        cb.id.toLowerCase() === rawTarget ||
+        (cb.slug && cb.slug.toLowerCase().replace(/^\/books?\//, '') === cleanTarget) ||
+        (cb.title && cb.title.toLowerCase() === cleanTarget)
+    );
+
+    return this.songs.filter((s) => {
+      const bId = (s.bookId || '').toLowerCase().trim();
+      const bTitle = (s.bookTitle || '').toLowerCase().trim();
+
+      let matches = false;
+      if (bId && (bId === cleanTarget || bId === rawTarget)) {
+        matches = true;
+      } else if (bTitle && (bTitle === cleanTarget || bTitle === rawTarget)) {
+        matches = true;
+      } else if (matchedBook) {
+        if (bId && (bId === matchedBook.id.toLowerCase() || (matchedBook.slug && bId === matchedBook.slug.toLowerCase().replace(/^\/books?\//, '')))) {
+          matches = true;
+        } else if (bTitle && bTitle === matchedBook.title.toLowerCase()) {
+          matches = true;
+        }
+      }
+
+      if (!matches) return false;
+      if (includeUnpublished) return true;
+      return s.status === 'Published' && s.isPublic !== false;
+    });
+  }
+
+  /**
+   * Handles unassigning songs when a series is deleted.
+   * Preserves songs as standalone tracks in the Audio Vault.
+   */
+  public async handleSeriesDeleted(deletedSeriesId: string): Promise<void> {
+    if (!deletedSeriesId) return;
+    const cleanId = deletedSeriesId.toLowerCase().trim();
+    const affected = this.songs.filter(
+      (s) => s.seriesId && s.seriesId.toLowerCase().trim() === cleanId
+    );
+    for (const song of affected) {
+      await this.saveSong({
+        id: song.id,
+        seriesId: '',
+        seriesName: '',
+        bookId: '',
+        bookTitle: '',
+      });
+    }
+  }
+
+  /**
+   * Handles unassigning songs from a book when that book is permanently deleted.
+   * Retains the song and any series association.
+   */
+  public async handleBookDeleted(deletedBookId: string): Promise<void> {
+    if (!deletedBookId) return;
+    const cleanId = deletedBookId.toLowerCase().trim();
+    const affected = this.songs.filter(
+      (s) => s.bookId && s.bookId.toLowerCase().trim() === cleanId
+    );
+    for (const song of affected) {
+      await this.saveSong({
+        id: song.id,
+        bookId: '',
+        bookTitle: '',
+      });
+    }
+  }
+
+  /**
+   * Returns all standalone songs (no series association).
+   */
+  public getStandaloneSongs(includeUnpublished = false): Song[] {
+    return this.songs.filter((s) => {
+      const isStandalone = !s.seriesId || s.seriesId.trim() === '';
+      if (!isStandalone) return false;
+      if (includeUnpublished) return true;
+      return s.status === 'Published' && s.isPublic !== false;
+    });
   }
 
   public async deleteSong(id: string): Promise<void> {
@@ -615,11 +824,14 @@ class SongService {
     const title = metadata?.title?.trim() || rawTitle || 'Untitled Track';
     const artist = metadata?.artist?.trim() || 'Matthew E. Messmer';
 
+    const desc = metadata?.description || `Audio track uploaded to vault: ${file.name}`;
     const newTrack: Partial<Song> = {
       title,
       artist,
       category: metadata?.category || 'Soundtrack Companion',
-      description: metadata?.description || `Audio track uploaded to vault: ${file.name}`,
+      trackDescription: desc,
+      storyBehindTrack: '',
+      description: desc,
       audioUrl: uploadResult.downloadUrl,
       storagePath: uploadResult.storagePath,
       fileSize: uploadResult.fileSize,

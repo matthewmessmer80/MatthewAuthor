@@ -3,6 +3,7 @@ import { Book } from '../types';
 import { bookService, managedBookToBook, ManagedSeries } from '../services/bookService';
 import { BookCard } from '../components/BookCard';
 import { BookCoverArt } from '../components/BookCoverArt';
+import { CompanionSongsSection } from '../components/CompanionSongsSection';
 import { useSEO } from '../hooks/useSEO';
 import { BookOpen, Sparkles, Feather, Shield, Compass, Flame, Layers, ArrowRight, CheckCircle2, Clock } from 'lucide-react';
 
@@ -253,6 +254,13 @@ export const BreathwovenCycleView: React.FC<BreathwovenCycleViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* Companion Soundtracks for The Breathwoven Cycle */}
+      <CompanionSongsSection
+        seriesId={seriesInfo?.id || 'breathwoven-cycle'}
+        seriesSlug="breathwoven-cycle"
+        seriesName={seriesInfo?.name || 'The Breathwoven Cycle'}
+      />
 
       {/* Universe Timeline Callout */}
       <div className="bg-[#11131c] border border-[#262838] p-8 rounded-2xl relative overflow-hidden">

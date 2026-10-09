@@ -3,6 +3,7 @@ import { Book } from '../types';
 import { bookService, managedBookToBook, ManagedSeries } from '../services/bookService';
 import { BookCoverArt } from '../components/BookCoverArt';
 import { BookCard } from '../components/BookCard';
+import { CompanionSongsSection } from '../components/CompanionSongsSection';
 import { NewsletterSignup } from '../components/NewsletterSignup';
 import { useSEO } from '../hooks/useSEO';
 import { Waves, Compass, Anchor, BookOpen, Clock, Shield, Sparkles, Layers, ArrowRight } from 'lucide-react';
@@ -246,6 +247,13 @@ export const AbyssalCurrentView: React.FC<AbyssalCurrentViewProps> = ({
           </div>
         </section>
       )}
+
+      {/* Companion Soundtracks for The Abyssal Current */}
+      <CompanionSongsSection
+        seriesId={seriesInfo?.id || 'abyssal-current'}
+        seriesSlug="abyssal-current"
+        seriesName={seriesInfo?.name || 'The Abyssal Current'}
+      />
 
       {/* Naval Precision & Worldbuilding Roots */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

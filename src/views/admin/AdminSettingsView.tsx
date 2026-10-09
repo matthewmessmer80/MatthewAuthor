@@ -27,6 +27,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { FirebaseDiagnostic } from '../../components/admin/FirebaseDiagnostic';
 import { backupService } from '../../services/backupService';
+import { AdminBackupView } from './AdminBackupView';
 import { siteSettingsService, SiteSettings } from '../../services/siteSettingsService';
 import {
   gmailAuthService,
@@ -59,8 +60,6 @@ export const AdminSettingsView: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [savedToast, setSavedToast] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [backupLoading, setBackupLoading] = useState(false);
-  const [backupSuccess, setBackupSuccess] = useState<string | null>(null);
 
   // Gmail OAuth Integration states
   const [gmailLoading, setGmailLoading] = useState(false);
@@ -273,21 +272,6 @@ export const AdminSettingsView: React.FC = () => {
     }
   };
 
-  const handleDownloadBackup = async () => {
-    if (!isAuthor) return;
-    setBackupLoading(true);
-    try {
-      await backupService.exportFullBackupJSON(role, user?.email || undefined);
-      setBackupSuccess('Site backup successfully generated and downloaded as backup-[timestamp].json.');
-      setTimeout(() => setBackupSuccess(null), 4000);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Failed to generate backup.';
-      alert(msg);
-    } finally {
-      setBackupLoading(false);
-    }
-  };
-
   return (
     <div className="space-y-8 max-w-4xl animate-in fade-in duration-200">
       <div className="border-b border-[#232635] pb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -337,43 +321,13 @@ export const AdminSettingsView: React.FC = () => {
         <FirebaseDiagnostic />
       </section>
 
-      {/* Site Backup & Data Preservation (Author Only) */}
+      {/* Admin Backup & Restore Panel (Author / Administrator Only) */}
       {isAuthor && (
         <section
           aria-labelledby="site-backup-heading"
-          className="p-6 bg-[#11131c] border border-[#232635] rounded-xl space-y-4"
+          className="pt-6 border-t border-[#232635]"
         >
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="space-y-1">
-              <h3
-                id="site-backup-heading"
-                className="text-sm font-cinzel font-semibold text-[#f5efeb] flex items-center gap-2"
-              >
-                <Database className="w-4 h-4 text-[#c5a059]" />
-                <span>Site Backup & Archive Download (Author Only)</span>
-              </h3>
-              <p className="text-xs text-[#8e887a]">
-                Generate an immediate full backup of all books, series, stories, news, newsletter subscribers, comments, and settings.
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleDownloadBackup}
-              disabled={backupLoading}
-              className="px-4 py-2 bg-[#c5a059] hover:bg-[#d6b066] text-[#0c0d12] text-xs font-cinzel font-bold uppercase tracking-wider rounded-lg transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50 shrink-0 self-start sm:self-auto shadow-md"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>{backupLoading ? 'Generating...' : 'Download Site Backup (.json)'}</span>
-            </button>
-          </div>
-
-          {backupSuccess && (
-            <div className="p-3 bg-emerald-950/70 border border-emerald-700/60 rounded-lg text-emerald-300 text-xs flex items-center gap-2 animate-in fade-in">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span>{backupSuccess}</span>
-            </div>
-          )}
+          <AdminBackupView />
         </section>
       )}
 

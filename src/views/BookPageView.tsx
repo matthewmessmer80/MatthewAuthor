@@ -1,6 +1,7 @@
 import React from 'react';
 import { Book } from '../types';
 import { BookCoverArt } from '../components/BookCoverArt';
+import { CompanionSongsSection } from '../components/CompanionSongsSection';
 import { NewsletterSignup } from '../components/NewsletterSignup';
 import { ReaderComments } from '../components/ReaderComments';
 import { useSEO } from '../hooks/useSEO';
@@ -201,6 +202,14 @@ export const BookPageView: React.FC<BookPageViewProps> = ({
           </div>
         );
       })()}
+
+      {/* Companion Soundtracks for this Book */}
+      <CompanionSongsSection
+        bookId={book.id}
+        bookTitle={book.title}
+        seriesId={book.seriesId}
+        seriesName={book.seriesName || book.series}
+      />
 
       {/* Reader Discussion / Comments Section (Prompt Section 5) */}
       <ReaderComments

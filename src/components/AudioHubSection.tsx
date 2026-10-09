@@ -11,6 +11,9 @@ import {
   FileText,
   X,
   VolumeX,
+  BookOpen,
+  Info,
+  Layers,
 } from 'lucide-react';
 import { Song, SongExternalLink } from '../types';
 import { songService } from '../services/songService';
@@ -25,7 +28,8 @@ interface AudioHubSectionProps {
 export default function AudioHubSection({ className = '', isStandalonePage = false }: AudioHubSectionProps) {
   const [songs, setSongs] = useState<Song[]>([]);
   const [playingSongId, setPlayingSongId] = useState<string | null>(null);
-  const [activeLyricsSong, setActiveLyricsSong] = useState<Song | null>(null);
+  const [activeDetailSong, setActiveDetailSong] = useState<Song | null>(null);
+  const [activeTabInModal, setActiveTabInModal] = useState<'all' | 'story' | 'lyrics'>('all');
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
@@ -107,6 +111,10 @@ export default function AudioHubSection({ className = '', isStandalonePage = fal
             const hasLyrics = !!song.lyrics?.trim();
             const dedicationNote = song.dedication || song.releaseNote;
 
+            // Separate independent fields: never combined
+            const trackDesc = (song.trackDescription && song.trackDescription.trim()) || (!song.trackDescription && song.description && song.description.trim()) || '';
+            const storyText = (song.storyBehindTrack && song.storyBehindTrack.trim()) || '';
+
             // Consolidate external links
             const links: SongExternalLink[] = song.externalLinks ? [...song.externalLinks] : [];
             if (song.youtubeUrl && !links.some((l) => l.platform === 'YouTube')) {
@@ -168,11 +176,41 @@ export default function AudioHubSection({ className = '', isStandalonePage = fal
                     </div>
                   </div>
 
-                  {/* Description */}
-                  {song.description && (
-                    <p className="text-[#a8a295] text-xs sm:text-sm mt-2 leading-relaxed">
-                      {song.description}
-                    </p>
+                  {/* Series and Book Association Badge */}
+                  {(song.seriesName || song.seriesId) && (
+                    <div className="flex items-center gap-1.5 text-[10px] font-cinzel text-[#c5a059] bg-[#c5a059]/10 border border-[#c5a059]/30 rounded-md px-2.5 py-1 w-fit">
+                      <Layers className="w-3 h-3 text-[#c5a059] shrink-0" />
+                      <span>
+                        Series: {song.seriesName || 'Associated Series'}
+                        {song.bookTitle ? ` · ${song.bookTitle}` : ''}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* 1. Track Description (Displayed independently only when content exists) */}
+                  {trackDesc && (
+                    <div className="space-y-1 pt-1">
+                      <h4 className="text-[11px] font-cinzel font-semibold uppercase tracking-wider text-[#c5a059] flex items-center gap-1.5">
+                        <Disc className="w-3 h-3 text-[#c5a059]" />
+                        <span>Track Description</span>
+                      </h4>
+                      <p className="text-[#a8a295] text-xs sm:text-sm leading-relaxed whitespace-pre-wrap">
+                        {trackDesc}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* 2. Story Behind the Track (Displayed independently only when content exists) */}
+                  {storyText && (
+                    <div className="p-3.5 bg-[#0a0b10] border border-[#1f2231] rounded-xl space-y-1.5">
+                      <h4 className="text-[11px] font-cinzel font-semibold uppercase tracking-wider text-[#c5a059] flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-[#c5a059]" />
+                        <span>Story Behind the Track</span>
+                      </h4>
+                      <div className="text-[#dcd7cb] font-cormorant text-sm sm:text-base italic leading-relaxed whitespace-pre-wrap">
+                        {storyText}
+                      </div>
+                    </div>
                   )}
 
                   {/* Dedication / Special Note */}
@@ -183,8 +221,22 @@ export default function AudioHubSection({ className = '', isStandalonePage = fal
                     </div>
                   )}
 
+                  {/* Series & Book Associations or Tags */}
+                  {song.tags && song.tags.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                      {song.tags.map((tag, idx) => (
+                        <span
+                          key={idx}
+                          className="px-2 py-0.5 rounded text-[10px] font-cinzel uppercase bg-[#141624] text-[#8e887a] border border-[#232635]"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
                   {/* Play & Preview Controls */}
-                  <div className="pt-1 flex items-center gap-3">
+                  <div className="pt-2 flex flex-wrap items-center gap-2.5">
                     <button
                       onClick={() => togglePlay(song)}
                       className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-cinzel font-semibold transition-all cursor-pointer ${
@@ -206,9 +258,25 @@ export default function AudioHubSection({ className = '', isStandalonePage = fal
                       )}
                     </button>
 
+                    {(storyText || trackDesc || hasLyrics) && (
+                      <button
+                        onClick={() => {
+                          setActiveDetailSong(song);
+                          setActiveTabInModal(storyText ? 'story' : hasLyrics ? 'lyrics' : 'all');
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-cinzel text-[#d4cfc2] hover:text-[#0c0d12] bg-[#12141f] hover:bg-[#c5a059] border border-[#232635] hover:border-[#c5a059] transition-colors cursor-pointer"
+                      >
+                        <BookOpen className="w-3.5 h-3.5" />
+                        <span>Story & Details</span>
+                      </button>
+                    )}
+
                     {hasLyrics && (
                       <button
-                        onClick={() => setActiveLyricsSong(song)}
+                        onClick={() => {
+                          setActiveDetailSong(song);
+                          setActiveTabInModal('lyrics');
+                        }}
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-cinzel text-[#b5af9f] hover:text-[#f5efeb] bg-[#12141f] hover:bg-[#1c1f2e] border border-[#232635] transition-colors cursor-pointer"
                       >
                         <FileText className="w-3.5 h-3.5 text-[#c5a059]" />
@@ -261,41 +329,169 @@ export default function AudioHubSection({ className = '', isStandalonePage = fal
         </div>
       )}
 
-      {/* Lyrics Modal */}
-      {activeLyricsSong && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="bg-[#11131c] border border-[#2b2e40] rounded-2xl max-w-lg w-full p-6 sm:p-8 space-y-4 max-h-[85vh] overflow-y-auto shadow-2xl relative animate-in fade-in">
-            <div className="flex items-center justify-between border-b border-[#212334] pb-3">
-              <div>
-                <span className="text-[11px] font-cinzel uppercase tracking-wider text-[#c5a059]">
-                  Song Lyrics
-                </span>
-                <h3 className="font-cinzel font-bold text-lg text-[#f5efeb]">
-                  {activeLyricsSong.title}
-                </h3>
+      {/* Expanded Story & Song Details Modal */}
+      {activeDetailSong && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-[#11131c] border border-[#2b2e40] rounded-2xl max-w-2xl w-full p-6 sm:p-8 space-y-6 max-h-[90vh] overflow-y-auto shadow-2xl relative">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between border-b border-[#212334] pb-4">
+              <div className="flex items-center gap-4">
+                {activeDetailSong.coverImage && (
+                  <div className="w-16 h-16 rounded-xl bg-[#0a0b10] border border-[#2b2e40] overflow-hidden shrink-0 shadow">
+                    <img
+                      src={activeDetailSong.coverImage}
+                      alt={activeDetailSong.title}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                )}
+                <div>
+                  <span className="text-[11px] font-cinzel uppercase tracking-wider text-[#c5a059] bg-[#c5a059]/10 border border-[#c5a059]/30 px-2 py-0.5 rounded">
+                    {activeDetailSong.category || 'Soundtrack Companion'}
+                  </span>
+                  <h3 className="font-cinzel font-bold text-xl sm:text-2xl text-[#f5efeb] mt-1">
+                    {activeDetailSong.title}
+                  </h3>
+                  <div className="text-xs text-[#8e887a] mt-0.5">
+                    By {activeDetailSong.artist || 'Matthew E. Messmer'}
+                    {activeDetailSong.releaseDate && ` · ${activeDetailSong.releaseDate}`}
+                  </div>
+                  {(activeDetailSong.seriesName || activeDetailSong.seriesId) && (
+                    <div className="flex items-center gap-1.5 text-[10px] font-cinzel text-[#c5a059] bg-[#c5a059]/10 border border-[#c5a059]/30 rounded-md px-2 py-0.5 w-fit mt-1.5">
+                      <Layers className="w-3 h-3 text-[#c5a059] shrink-0" />
+                      <span>
+                        Series: {activeDetailSong.seriesName || 'Associated Series'}
+                        {activeDetailSong.bookTitle ? ` · ${activeDetailSong.bookTitle}` : ''}
+                      </span>
+                    </div>
+                  )}
+                </div>
               </div>
               <button
                 type="button"
-                onClick={() => setActiveLyricsSong(null)}
+                onClick={() => setActiveDetailSong(null)}
                 className="text-[#7d776a] hover:text-[#f5efeb] p-1.5 rounded-lg transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="text-xs text-[#8e887a]">
-              By {activeLyricsSong.artist || 'Matthew E. Messmer'}
-              {activeLyricsSong.dedication && ` · ${activeLyricsSong.dedication}`}
+            {/* Dedication Banner if present */}
+            {activeDetailSong.dedication && (
+              <div className="p-3 bg-rose-950/20 border border-rose-900/40 rounded-xl text-xs text-rose-200/90 font-cormorant italic flex items-center gap-2">
+                <Heart className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>"{activeDetailSong.dedication}"</span>
+              </div>
+            )}
+
+            {/* Modal Tab Controls */}
+            <div className="flex items-center gap-2 border-b border-[#1f2231] pb-2 text-xs font-cinzel">
+              <button
+                onClick={() => setActiveTabInModal('all')}
+                className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${
+                  activeTabInModal === 'all'
+                    ? 'bg-[#c5a059] text-[#0c0d12] font-bold'
+                    : 'text-[#8e887a] hover:text-[#f5efeb]'
+                }`}
+              >
+                Overview
+              </button>
+              {activeDetailSong.storyBehindTrack && (
+                <button
+                  onClick={() => setActiveTabInModal('story')}
+                  className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 ${
+                    activeTabInModal === 'story'
+                      ? 'bg-[#c5a059] text-[#0c0d12] font-bold'
+                      : 'text-[#8e887a] hover:text-[#f5efeb]'
+                  }`}
+                >
+                  <Sparkles className="w-3 h-3" />
+                  <span>Story Behind the Track</span>
+                </button>
+              )}
+              {activeDetailSong.lyrics && (
+                <button
+                  onClick={() => setActiveTabInModal('lyrics')}
+                  className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 ${
+                    activeTabInModal === 'lyrics'
+                      ? 'bg-[#c5a059] text-[#0c0d12] font-bold'
+                      : 'text-[#8e887a] hover:text-[#f5efeb]'
+                  }`}
+                >
+                  <FileText className="w-3 h-3" />
+                  <span>Lyrics</span>
+                </button>
+              )}
             </div>
 
-            <div className="p-4 bg-[#0a0b10] border border-[#1f2231] rounded-xl font-cormorant text-base sm:text-lg text-[#f5efeb] whitespace-pre-wrap leading-relaxed max-h-96 overflow-y-auto">
-              {activeLyricsSong.lyrics}
+            {/* Modal Content Sections */}
+            <div className="space-y-6">
+              {/* 1. Track Description (Shown in 'all' view if populated) */}
+              {(activeTabInModal === 'all') &&
+                (activeDetailSong.trackDescription || activeDetailSong.description) && (
+                  <div className="space-y-2">
+                    <h4 className="text-xs font-cinzel font-bold uppercase tracking-wider text-[#c5a059] flex items-center gap-2">
+                      <Disc className="w-4 h-4" />
+                      <span>Track Description</span>
+                    </h4>
+                    <p className="text-xs sm:text-sm text-[#a8a295] leading-relaxed whitespace-pre-wrap font-sans bg-[#0a0b10] p-4 rounded-xl border border-[#1f2231]">
+                      {activeDetailSong.trackDescription || activeDetailSong.description}
+                    </p>
+                  </div>
+                )}
+
+              {/* 2. Story Behind the Track (Shown in 'all' or 'story' view if populated) */}
+              {(activeTabInModal === 'all' || activeTabInModal === 'story') &&
+                activeDetailSong.storyBehindTrack && (
+                  <div className="space-y-2">
+                    <h4 className="text-xs font-cinzel font-bold uppercase tracking-wider text-[#c5a059] flex items-center gap-2">
+                      <Sparkles className="w-4 h-4" />
+                      <span>Story Behind the Track</span>
+                    </h4>
+                    <div className="p-5 bg-[#0a0b10] border border-[#1f2231] rounded-xl font-cormorant text-base sm:text-lg text-[#f5efeb] leading-relaxed whitespace-pre-wrap italic">
+                      {activeDetailSong.storyBehindTrack}
+                    </div>
+                  </div>
+                )}
+
+              {/* 3. Lyrics (Shown in 'all' or 'lyrics' view if populated) */}
+              {(activeTabInModal === 'all' || activeTabInModal === 'lyrics') &&
+                activeDetailSong.lyrics && (
+                  <div className="space-y-2">
+                    <h4 className="text-xs font-cinzel font-bold uppercase tracking-wider text-[#c5a059] flex items-center gap-2">
+                      <FileText className="w-4 h-4" />
+                      <span>Song Lyrics</span>
+                    </h4>
+                    <div className="p-5 bg-[#0a0b10] border border-[#1f2231] rounded-xl font-mono text-xs sm:text-sm text-[#e8e2d8] leading-relaxed whitespace-pre-wrap max-h-72 overflow-y-auto">
+                      {activeDetailSong.lyrics}
+                    </div>
+                  </div>
+                )}
             </div>
 
-            <div className="pt-2 text-right">
+            {/* Modal Footer */}
+            <div className="flex items-center justify-between border-t border-[#1f2231] pt-4">
               <button
                 type="button"
-                onClick={() => setActiveLyricsSong(null)}
+                onClick={() => togglePlay(activeDetailSong)}
+                className="px-4 py-2 bg-[#1b1e2c] hover:bg-[#c5a059] text-xs font-cinzel font-semibold text-[#f5efeb] hover:text-[#0c0d12] rounded-lg transition-colors cursor-pointer flex items-center gap-2"
+              >
+                {playingSongId === activeDetailSong.id ? (
+                  <>
+                    <Pause className="w-3.5 h-3.5 fill-current" />
+                    <span>Pause Audio</span>
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-3.5 h-3.5 fill-current" />
+                    <span>Play Audio Track</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveDetailSong(null)}
                 className="px-4 py-2 bg-[#1b1e2c] hover:bg-[#25283c] text-xs font-cinzel text-[#d4cfc2] rounded-lg transition-colors cursor-pointer"
               >
                 Close

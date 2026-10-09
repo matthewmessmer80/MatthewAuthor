@@ -562,7 +562,7 @@ export interface VideoSettings {
 export type SongStatus = 'Draft' | 'Published' | 'Unreleased';
 
 export interface SongExternalLink {
-  platform: 'Spotify' | 'YouTube' | 'SoundCloud' | 'Bandcamp';
+  platform: 'Spotify' | 'YouTube' | 'SoundCloud' | 'Bandcamp' | 'Suno' | string;
   url: string;
 }
 
@@ -571,7 +571,13 @@ export interface Song {
   title: string;
   artist: string;
   category: string; // e.g., "Original Country & Acoustic", "Dedication Track", "Soundtrack Companion"
-  description: string;
+  seriesId?: string; // Associated Book Series document ID (empty or undefined for standalone)
+  seriesName?: string; // Associated Book Series name for fast display / caching
+  bookId?: string; // Associated Book document ID (optional within the selected series)
+  bookTitle?: string; // Associated Book title for fast display / caching
+  trackDescription?: string; // Musical genre, sound, mood, themes, what listeners can expect
+  storyBehindTrack?: string; // Inspiration, meaning, creative process, personal or fictional story
+  description: string; // Retained for backwards compatibility
   lyrics?: string;
   dedication?: string;
   audioUrl?: string; // Direct audio file or streaming preview
@@ -587,6 +593,7 @@ export interface Song {
   spotifyUrl?: string;
   soundcloudUrl?: string;
   bandcampUrl?: string;
+  sunoUrl?: string;
   releaseNote?: string; // Backwards compatibility for dedication note display
   storagePath?: string; // Firebase storage location
   fileSize?: number; // Size in bytes

@@ -231,7 +231,16 @@ service cloud.firestore {
     // Songs & Music Library
     match /songs/{songId} {
       allow read: if true;
-      allow create, update: if isEditor();
+      allow create: if isAuthor() || (
+        isEditor() &&
+        (!('seriesId' in request.resource.data) || request.resource.data.seriesId == '' || request.resource.data.seriesId == null) &&
+        (!('bookId' in request.resource.data) || request.resource.data.bookId == '' || request.resource.data.bookId == null)
+      );
+      allow update: if isAuthor() || (
+        isEditor() &&
+        // Editors cannot modify literary series or book relationships
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['seriesId', 'seriesName', 'bookId', 'bookTitle'])
+      );
       allow delete: if isAuthor();
     }
   }
